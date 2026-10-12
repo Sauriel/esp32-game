@@ -1,268 +1,119 @@
-# ESP-IDF + Arduino + Bluepad32 template app
+# ESP32 Gameduino 2 Game
 
-[![discord](https://img.shields.io/discord/775177861665521725.svg)](https://discord.gg/r5aMn6Cw5q)
+Ein kleines 2D-Spielprojekt für einen **ESP32** mit **Gameduino 2 (FT800)** und einem **PlayStation-4-Controller** über Bluetooth. Das Projekt ist noch ein Prototyp: Aktuell lässt sich ein Rechteck mit dem linken Analogstick über den Bildschirm bewegen.
 
-![logo](https://gitlab.com/ricardoquesada/bluepad32-arduino/-/raw/main/img/bluepad32-arduino-logo.png)
+Entwickelt wird mit **C++**, **PlatformIO**, **ESP-IDF**, **Arduino als ESP-IDF-Komponente** und **Bluepad32**.
 
-This is a template application to be used
-with [Espressif IoT Development Framework](https://github.com/espressif/esp-idf).
+## Aktueller Stand
 
-Please check [ESP-IDF docs](https://docs.espressif.com/projects/esp-idf/en/latest/get-started/index.html) for getting
-started instructions.
+- Gameduino-2-Display über SPI ansteuern (480 × 272 Pixel)
+- DualShock-4-Controller über Bluepad32 verbinden und Eingaben auslesen
+- Rechteck mit dem linken Analogstick bewegen und innerhalb des Bildschirms halten
+- Spiellogik, Eingabeverarbeitung und Displayinitialisierung in getrennten Modulen
 
-Requires ESP-IDF **v5.4.2**.
+**Noch nicht umgesetzt:** eigentliche Spielmechaniken, Sprites, Karten, Audio oder ein zeitbasiertes Update mit Delta-Time.
 
-Includes the following ESP-IDF components, with a pre-configured `sdkconfig` file:
+## Hardware
 
-* [Arduino Core for ESP32](https://github.com/espressif/arduino-esp32) component
-* [Bluepad32](https://github.com/ricardoquesada/bluepad32/) component
-* [BTStack](https://github.com/bluekitchen/btstack) component
+- ESP32 Dev Module (klassischer ESP32)
+- Gameduino 2 mit FT800
+- PlayStation-4-Controller (DualShock 4)
+- Verbindungsleitungen und passende Stromversorgung
 
-## How to compile it
+### Verkabelung
 
-Clone the template project:
+| Gameduino 2 | ESP32 | Funktion |
+| --- | --- | --- |
+| 5V | 5V | Versorgung |
+| GND | GND | Gemeinsame Masse |
+| D13 / SCK | GPIO18 | SPI-Takt |
+| D12 / MISO | GPIO19 | SPI-Daten vom Display |
+| D11 / MOSI | GPIO23 | SPI-Daten zum Display |
+| D8 / GPU CS | GPIO5 | FT800-Chip-Select |
+| D9 / SD CS | GPIO27 | SD-Karten-Chip-Select |
 
-   ```sh
-   git clone --recursive https://github.com/ricardoquesada/esp-idf-arduino-bluepad32-template.git my_project
-   ```
+Der SD-CS wird beim Start auf **HIGH** gesetzt, damit die SD-Karte den SPI-Bus nicht stört. Die SD-Karten-Funktionen des Gameduino sind noch nicht implementiert.
 
-After cloning the *template* you have the following options:
+**Achtung:** ESP32-GPIOs sind nicht 5-V-tolerant. Zusätzliche Signale des Shields nur anschließen, wenn deren Pegel zum ESP32 passen.
 
-* A) Using PlatformIO
-* B) Visual Studio Code + ESP-IDF plugin
-* C) CLion (personal favorite)
-* D) ESP-IDF from command line
+## Software und Abhängigkeiten
 
-*Note: Arduino IDE is not supported in this "template app" project*
+Die aktuell verwendete Kombination:
 
-### A) Using PlatformIO + ESP-IDF
+| Komponente | Version |
+| --- | --- |
+| ESP-IDF | 5.4.2 |
+| Arduino-ESP32 | 3.2.1 |
+| Bluepad32 | 4.2.0 |
+| BTstack | 1.6.2 |
+| PlatformIO-Plattform (pioarduino) | 54.03.21 |
 
-![open_project][pio_open_project]
+`components/gameduino2/` und `components/bluepad32_arduino/` enthalten die für dieses Projekt verwendeten, angepassten Bibliotheken.
 
-1. Open Visual Studio Code, select the PlatformIO plugin
-2. Click on "Pick a folder", and select the recently cloned "my_project" folder
+Die umfangreichen Fremdkomponenten `arduino`, `bluepad32`, `btstack`, `cmd_nvs` und `cmd_system` werden **nicht** im Git-Repository gespeichert. Das Script `setup-deps.sh` ist dafür vorgesehen, diese Komponenten nach einem Clone herunterzuladen, ohne vorhandene Verzeichnisse zu überschreiben.
 
-That's it. The PlatformIO will download the ESP-IDF toolchain and its dependencies.
+## Einrichten und bauen
 
-It might take a few minutes to download all dependencies. Be patient.
+Voraussetzungen: **Git**, **PlatformIO Core** (`pio`) und eine funktionierende ESP32-Toolchain-Installation. Der erste Build lädt je nach Umgebung zusätzliche Werkzeuge herunter.
 
-*Note: You might need to remove previously installed PlatformIO packages. Just do `rm -rf ~/.platformio`
-and reinstall the PlatformIO plugin.*
+```bash
+# Repository klonen und in das Projekt wechseln
+# (Repository-URL von der GitHub-Projektseite verwenden)
 
-![build_project][pio_build_project]
+# Externe ESP-IDF-Komponenten installieren
+bash setup-deps.sh
 
-After all dependencies were installed:
+# Firmware bauen
+pio run -e esp32dev
 
-1. Click on one of the pre-created boards, like *esp32-s3-devkit-1*. Or edit `platformio.ini` file, and add your own.
-2. Click on *build*
+# Firmware auf den ESP32 übertragen
+pio run -e esp32dev -t upload
 
-![monitor_project][pio_monitor_project]
-
-Finally, click on "Upload and Monitor":
-
-* It will upload your sketch
-* And will enter into "monitor" mode: You can see and use the console. Try typing `help` on the console.
-
-Further reading: [PlatformIO Espressif IoT Development Framework][pio_espidf]
-
-[pio_open_project]: https://lh3.googleusercontent.com/pw/ABLVV85JEEjjsQqcCcfZUclYF1ItYSHPmpzP0SC4VH9Ypqp05r2ixlv9C2xv4p-r6fW_CyCNa8ylmeSjyUg_K2Sp-XUXQRTYO_6HvhQXcXxTZXgQvvNBqA8JaerwCB1UODkXgYa_6ONT19KTO52OMs0eOOeeMg=-no-gm?authuser=0
-
-[pio_build_project]: https://lh3.googleusercontent.com/pw/ABLVV86DiV9H-wDEv1X8ra_fJAw0OG2sBoM5d0gJElPfptzVpb6n8gzOEHDfKXLMKrivzNSt03XpMWSw-hSVJUi0aavQiwgL0t1rmQeKqfYpXkGCKKwcerrNx8BBkFR3VoKQEPMF-e-xVvKVque2pi1sTa8tWA=-no-gm?authuser=0
-
-[pio_monitor_project]: https://lh3.googleusercontent.com/pw/ABLVV845uPqRtJkUrv4JlODuTr7Shnw0HR7BdojRbxv3xWyiUO-V_Kv42YAKAV-XyoNRPY5vsyj0yRDsRxH0mxz8Q1NYzvhCKw5Ni9MH6UYR8IiaT8XS9hysR81APn8X2tnVgnmJ6ZkSPCgUURnE2MVYIWYrNQ=-no-gm?authuser=0
-
-[pio_espidf]: https://docs.platformio.org/en/latest/frameworks/espidf.html
-
-### B) Visual Studio Code + ESP-IDF plugin
-
-![vscode_ide](https://lh3.googleusercontent.com/pw/AM-JKLUxjqUhU2tM-bKw3togS3gTkBdtmi40kqW2c2KieAybnD770I3pdaLnFU7a-sM7dUUGmcWpigvElc1fGo1J-5bJlVdbg8HOJZKbUXo6A_IqIvUGEK6GtwxqNy5EFJmijrBnB_aQhd_fi3GQnXZ1V7WYvw=-no)
-
-Open [Visual Studio Code][vscode] and install the [ESP-IDF plugin][esp-idf-plugin].
-
-Features:
-
-* All the regular Visual Studio Code regular features
-* ...plus configure, build, flash and monitor your project
-* ...and much more
-
-[vscode]: https://code.visualstudio.com/
-
-[esp-idf-plugin]: https://github.com/espressif/vscode-esp-idf-extension
-
-### C) CLion
-
-![clion_ide](https://lh3.googleusercontent.com/pw/AP1GczO-t-uncCZJF8ygBXWmO8Dvrx3C4f7tHhisfF39GKXUaryiRA5rYJWx3SQR8fR1orYGmHdOSVnZLVdoYtoc6IYnurdbtXo6_4ZIVgwnzyWJrNkyQFHu6kma6c__YePCddO9BjMFWHyVrBBk7rmNki5EDQ=-no-gm?authuser=0)
-
-[CLion][clion] is a great IDE, and my personal favorite. It works very well with ESP-IDF based projects.
-
-To integrate your project with CLion, follow the steps in the [CLion official documentation][clion_esp_idf].
-
-[clion]: https://www.jetbrains.com/clion/
-
-[clion_esp_idf]: https://www.jetbrains.com/help/clion/esp-idf.html
-
-### D) ESP-IDF from command line
-
-#### For Windows
-
-1. Install [ESP-IDF v5.4][esp-idf-windows-installer]. For further info,
-   read: [ESP-IDF Getting Started for Windows][esp-idf-windows-setup]
-
-    * Either the Online or Offline version should work
-    * When asked which components to install, don't change anything. Default options are Ok.
-    * When asked whether ESP can modify the system, answer "Yes"
-
-2. Launch the "ESP-IDF v5.4 CMD" (type that in the Windows search box)
-
-3. Compile it
-
-    ```sh
-    # Compile it
-    cd my_project
-    idf.py build
-
-    # Flash + open debug terminal
-    idf.py flash monitor
-    ```
-
-[esp-idf-windows-setup]: https://docs.espressif.com/projects/esp-idf/en/latest/esp32/get-started/windows-setup.html
-
-[esp-idf-windows-installer]: https://dl.espressif.com/dl/esp-idf/?idf=5.4
-
-#### For Linux / macOS
-
-1. Requirements and permissions
-
-   Install ESP-IDF dependencies (taken from [here][toolchain-deps]):
-
-    ```sh
-    # For Ubuntu / Debian
-    sudo apt-get install git wget flex bison gperf python3 python3-pip python3-setuptools cmake ninja-build ccache libffi-dev libssl-dev dfu-util libusb-1.0-0
-    ```
-
-   And in case you don't have permissions to open `/dev/ttyUSB0`, do:
-   (taken from [here][ttyusb0])
-
-    ```sh
-    # You MUST logout/login (or in some cases reboot Linux) after running this command
-    sudo usermod -a -G dialout $USER
-    ```
-
-2. Install and setup ESP-IDF
-
-    ```sh
-    # Needs to be done just once
-    # Clone the ESP-IDF git repo
-    mkdir ~/esp && cd ~/esp
-    git clone -b release/v5.4 --recursive https://github.com/espressif/esp-idf.git
-
-    # Then install the toolchain
-    cd ~/esp/esp-idf
-    ./install.sh
-    ```
-
-3. Compile the template
-
-   Clone the template:
-
-    ```sh
-    # Do it everytime you want to start a new project
-    # Clone the template somewhere
-    mkdir ~/src && cd ~/src
-    git clone --recursive https://github.com/ricardoquesada/esp-idf-arduino-bluepad32-template.git my_project
-    ```
-
-   Export the ESP-IDF environment variables in your shell:
-
-    ```sh
-    # Do it everytime you open a new shell
-    # Optional: add it in your ~/.bashrc or ~/.profile
-    source ~/esp/esp-idf/export.sh
-    ```
-
-   And finally compile and install your project.
-
-    ```sh
-    # Compile it
-    cd ~/src/my_project
-    idf.py build
-
-    # Flash + open debug terminal
-    idf.py flash monitor
-    ```
-
-[toolchain-deps]: https://docs.espressif.com/projects/esp-idf/en/latest/esp32/get-started/linux-setup.html
-
-[ttyusb0]: https://docs.espressif.com/projects/esp-idf/en/latest/esp32/get-started/establish-serial-connection.html#linux-dialout-group
-
-## Using 3rd party Arduino libraries
-
-To include 3rd party Arduino libraries in your project, you have to:
-
-* Add them to the `components` folder.
-* Add `CMakeLists.txt` file inside the component's folder
-
-Let's use a real case as an example:
-
-### Example: Adding ESP32Servo
-
-Suppose you want to use [ESP32Servo] project. The first thing to notice is that the source files are placed
-in the `src` folder. We have to create a `CMakeLists.txt` file that tells ESP-IDF to look for the sources
-in the `src` folder.
-
-Example:
-
-```sh
-# 1) We clone ESP32Servo into components folder
-cd components
-git clone https://github.com/madhephaestus/ESP32Servo.git
-cd ESP32Servo
+# Seriellen Monitor öffnen
+pio device monitor -e esp32dev
 ```
 
-And now create these files inside `components/ESP32Servo` folder:
+**USB-Port beachten:** `platformio.ini` enthält derzeit einen gerätespezifischen `/dev/serial/by-id/...`-Pfad. Auf einem anderen Rechner muss dieser gegebenenfalls angepasst werden, beispielsweise auf `/dev/ttyUSB0`.
 
-```sh
-# 2) Create CMakeLists.txt file
-# Copy & paste the following lines to the terminal:
-cat << EOF > CMakeLists.txt
-idf_component_register(SRC_DIRS "src"
-                    INCLUDE_DIRS "src"
-                    REQUIRES "arduino")
-EOF
+**Stand der Anleitung:** Der Build wurde mit den lokal installierten Abhängigkeiten erfolgreich getestet. Ein vollständiger Build aus einem frischen Clone mit `setup-deps.sh` muss noch verifiziert werden.
+
+## Projektstruktur
+
+```text
+.
+├── components/
+│   ├── bluepad32_arduino/   # Angepasste Bluepad32-/Arduino-Integration
+│   └── gameduino2/         # Angepasste Gameduino-2-Bibliothek
+├── main/
+│   ├── display/            # Initialisierung von SPI und Gameduino
+│   ├── game/               # Spielzustand, Bewegung und Darstellung
+│   ├── input/              # Bluetooth-Controller und Eingabestatus
+│   ├── main.c              # Bluepad32-/ESP-IDF-Einstiegspunkt
+│   └── main.cpp            # setup() und loop()
+├── patches/                # Ergänzende Patches aus der Entwicklung
+├── CMakeLists.txt
+├── platformio.ini
+├── sdkconfig.defaults
+└── setup-deps.sh           # Installation externer Komponenten
 ```
 
-Finally, update the dependencies in the `main/CMakeLists.txt`. E.g:
+Die zusätzlich installierten Fremdkomponenten erscheinen ebenfalls unter `components/`, sind aber durch `.gitignore` vom Repository ausgeschlossen.
 
-```sh
-cd main
-edit CMakeLists.txt
-```
+## Bedienung
 
-...and append `ESP32Servo` to `REQUIRES`. The `main/CMakeLists.txt` should look like this:
+1. ESP32 mit dem Gameduino 2 verbinden und einschalten.
+2. DualShock 4 per Bluetooth mit Bluepad32 koppeln.
+3. Das orange Rechteck mit dem **linken Analogstick** bewegen.
 
-```cmake
-idf_component_register(SRCS "${srcs}"
-        INCLUDE_DIRS "."
-        REQUIRES "${requires}" "ESP32Servo")
-```
+Die Darstellung verwendet aktuell eine einfache Testgrafik und ein festes `delay(100)` in der Hauptschleife.
 
-And that's it. Now you can include `ESP32Servo` from your code. E.g:
+## Geplante nächste Schritte
 
-```cpp
-// Add this include in your arduino_main.cpp file
-#include <ESP32Servo.h>
-```
+- Hauptschleife mit geregelter Framerate und Delta-Time
+- Spielfigur und Sprite-Darstellung
+- Tilemap, Kollisionen und grundlegende 2D-Spielmechaniken
+- Weitere Controller-Aktionen
 
-[esp32servo]: https://github.com/madhephaestus/ESP32Servo.git
+## Hinweise
 
-## Further info
-
-* [Bluepad32 for Arduino](https://bluepad32.readthedocs.io/en/latest/plat_arduino/)
-* [Arduino as ESP-IDF component](https://docs.espressif.com/projects/arduino-esp32/en/latest/esp-idf_component.html)
-* [ESP-IDF VSCode plugin](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/get-started/vscode-setup.html)
-
-## Support
-
-* [Discord][discord]: any question? Ask them on our Discord server.
-
-[discord]: https://discord.gg/r5aMn6Cw5q
+Dieses Repository ist ein Lern- und Entwicklungsprojekt, kein fertiges Spiel. Es nutzt Drittanbieter-Komponenten mit eigenen Lizenzen; Details stehen in den jeweiligen Projekten. Für dieses Projekt gilt die Lizenz in [`LICENSE`](LICENSE).
