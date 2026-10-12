@@ -1,6 +1,6 @@
 # ESP32 Gameduino 2 Game
 
-Ein kleines 2D-Spielprojekt für einen **ESP32** mit **Gameduino 2 (FT800)** und einem **PlayStation-4-Controller** über Bluetooth. Das Projekt ist noch ein Prototyp: Aktuell lässt sich ein Rechteck mit dem linken Analogstick über den Bildschirm bewegen.
+Ein kleines 2D-Spielprojekt für einen **ESP32** mit **Gameduino 2 (FT800)** und einem **PlayStation-4-Controller** über Bluetooth. Das Projekt ist noch ein Prototyp: Die Testszene enthält zwei unabhängig steuerbare Blöcke und eine Anzeige für Tastendrücke.
 
 Entwickelt wird mit **C++**, **PlatformIO**, **ESP-IDF**, **Arduino als ESP-IDF-Komponente** und **Bluepad32**.
 
@@ -8,7 +8,8 @@ Entwickelt wird mit **C++**, **PlatformIO**, **ESP-IDF**, **Arduino als ESP-IDF-
 
 - Gameduino-2-Display über SPI ansteuern (480 × 272 Pixel)
 - DualShock-4-Controller über Bluepad32 verbinden und Eingaben auslesen
-- Rechteck mit dem linken Analogstick bewegen und innerhalb des Bildschirms halten
+- Zwei Blöcke mit linkem und rechtem Analogstick bewegen und innerhalb des Spielbereichs halten
+- Tastendrücke oben mittig für eine Sekunde anzeigen (z. B. `X (Cross) Pressed`)
 - Spiellogik, Eingabeverarbeitung und Displayinitialisierung in getrennten Modulen
 
 **Noch nicht umgesetzt:** eigentliche Spielmechaniken, Sprites, Karten, Audio oder ein zeitbasiertes Update mit Delta-Time.
@@ -77,6 +78,34 @@ pio device monitor -e esp32dev
 
 **Stand der Anleitung:** Der Build wurde mit den lokal installierten Abhängigkeiten erfolgreich getestet. Ein vollständiger Build aus einem frischen Clone mit `setup-deps.sh` muss noch verifiziert werden.
 
+### Fehlende Zertifikats-Assembly beim Build
+
+Die Arduino-Komponentenabhängigkeiten binden unter anderem ESP Insights und
+RainMaker ein. Deren Zertifikate werden von ESP-IDF über `target_add_binary_data()`
+in Assembly-Dateien umgewandelt. PlatformIO 54.03.21 übernimmt diese generierten
+Quellen, führt deren CMake-Erzeugungsregeln aber nicht automatisch aus. Dadurch kann
+der Build mit `Source .../https_server.crt.S not found` abbrechen; der doppelte
+`.pio/build/esp32dev`-Pfad betrifft den daraus abgeleiteten Objektpfad.
+
+Der Projekt-Hook in `cmake/EmbedData.cmake` erzeugt bereits vorhandene einzubettende
+Dateien zusätzlich bei der CMake-Konfiguration mit dem originalen ESP-IDF-Konverter.
+Die ursprünglichen Buildregeln und Symbolnamen bleiben erhalten; Fremdkomponenten
+werden nicht geändert. Generierte Eingaben wie das mbedTLS-Zertifikatsbündel behalten
+ihren eigenen Erzeugungsweg. `main` deklariert außerdem `gameduino2` ausdrücklich
+als Abhängigkeit, damit dessen Header und Bibliothek korrekt eingebunden werden.
+
+Nach Übernahme der Korrektur bei Bedarf die Build-Artefakte neu erzeugen:
+
+```bash
+pio run -e esp32dev -t clean
+pio run -e esp32dev
+```
+
+Prüfstand der Korrektur: CMake-Konfiguration erfolgreich; die vier Assemblydateien
+für Insights/RainMaker wurden erzeugt und direkt mit der ESP32-Toolchain kompiliert.
+Ein vollständiger PlatformIO-Build ist hier weiterhin durch den separaten
+SCons-Installationsfehler `No module named 'SCons.Tool.FortranCommon'` blockiert.
+
 ## Projektstruktur
 
 ```text
@@ -103,9 +132,74 @@ Die zusätzlich installierten Fremdkomponenten erscheinen ebenfalls unter `compo
 
 1. ESP32 mit dem Gameduino 2 verbinden und einschalten.
 2. DualShock 4 per Bluetooth mit Bluepad32 koppeln.
-3. Das orange Rechteck mit dem **linken Analogstick** bewegen.
+3. Den orangefarbenen Block mit dem **linken Analogstick** bewegen.
+4. Den blauen Block mit dem **rechten Analogstick** bewegen.
+5. Eine Taste drücken: Oben mittig erscheint ihr Name mit `Pressed` für eine Sekunde.
+   Halten verlängert die Anzeige nicht; ein neuer Tastendruck ersetzt sie. Bei mehreren
+   gleichzeitigen Tastendrücken wird der erste Eintrag aus der Tabelle in `Game.cpp` angezeigt.
+
+Die Blöcke sind jeweils 20 × 20 Pixel groß und starten getrennt voneinander.
+Die oberen 32 Pixel bleiben für den Text frei; beide Blöcke werden darunter an den
+Bildschirmrändern begrenzt. Ohne Controller bleiben sie stehen und die Anzeige lautet
+`Controller disconnected`. Die Szene verwendet FT800-Rechtecke und die eingebaute
+Schrift, ohne neue Bitmap-Assets oder RAM_G-Belegung. Der zusätzliche statische
+Spielzustand und die feste Tabelle benötigen keine Heap-Allokationen. Darstellung,
+Bewegung beider Sticks und alle Tasten müssen noch auf der Hardware geprüft werden.
+Ein temporärer Host-Test mit Display-Testdouble prüfte unabhängige Bewegung,
+Randbegrenzung, Anzeigedauer (auch beim Uhrüberlauf) und Disconnect erfolgreich.
+`Game.cpp` wurde direkt mit der ESP32-Toolchain und dem zusätzlichen Include-Pfad
+zur projektlokalen Gameduino-Bibliothek kompiliert. Der vollständige PlatformIO-Build
+scheitert weiterhin am unten beschriebenen SCons-Fehler.
 
 Die Darstellung verwendet aktuell eine einfache Testgrafik und ein festes `delay(100)` in der Hauptschleife.
+
+### Controller-Snapshot
+
+`GameInput::update()` fragt Bluepad32 ab und erstellt einen Eingabe-Snapshot.
+`getInput()` gibt diesen unverändert zurück, auch bei mehrfachem Lesen im selben Update.
+Der erste verbundene Gamepad-Slot liefert die Eingaben; `connected` zeigt dessen Verbindungsstatus.
+
+| Felder in `InputState` | Eingabe |
+| --- | --- |
+| `moveX`, `moveY` | Linker Stick |
+| `lookX`, `lookY` | Rechter Stick |
+| `leftTrigger`, `rightTrigger` | Analoge L2-/R2-Werte von 0 bis 1 |
+| `cross`, `circle`, `square`, `triangle` | Kreuz, Kreis, Quadrat, Dreieck |
+| `dpadUp`, `dpadDown`, `dpadLeft`, `dpadRight` | Steuerkreuz, einschließlich gleichzeitig gedrückter Richtungen |
+| `l1`, `r1`, `l2`, `r2`, `l3`, `r3` | Schulter-, Trigger- und Stick-Tasten |
+| `share`, `options`, `ps` | Share, Options, PS |
+
+Jede digitale Taste hat `held` (gehalten), `pressed` (gerade gedrückt) und
+`released` (gerade losgelassen). Beispielsweise kann `input.cross.pressed` eine
+Interaktion einmal auslösen. Die weiteren Spielaktionen sind noch nicht angebunden.
+Das Steuerkreuz wird separat bereitgestellt und bewegt die Blöcke nicht.
+Das bisherige Kompatibilitätsfeld `action` wurde entfernt; Kreuz wird über `cross` gelesen.
+
+Beide Sticks werden auf den Bereich -1 bis 1 begrenzt, mit einer pro Achse
+angewandten Deadzone von 12 % und linearer Neuskalierung außerhalb davon;
+positive Y-Werte zeigen nach unten. Die Deadzone ist ein vorläufiger Parameter.
+Die Wertebereiche und Tasten-Zuordnungen wurden im lokalen Bluepad32-DS4-Parser
+geprüft: Sticks `(raw - 127) * 4` (-508 bis 512), Trigger `raw * 4` (0 bis 1020).
+Die negative Stick-Endlage liegt durch die symmetrische Division durch 512 leicht über -1.
+Eine Kalibrierung am echten Controller steht noch aus.
+
+Bei Verbindungsverlust werden Achsen und gehaltene Tasten neutral; zuvor gehaltene
+Tasten liefern einmal `released`. Beim Wechsel zum anderen Gamepad beginnt dessen
+Tastenzustand neu. Der Touchpad-Klick wird vom installierten DS4-Parser nicht als
+Gamepad-Taste ausgegeben; Touch-Koordinaten gehören zum hier deaktivierten virtuellen
+Mausgerät. PS kann zusätzlich vom Bluetooth-Backend behandelt werden.
+
+Die Erweiterung verwendet feste Strukturen ohne neue Heap-Allokationen oder
+Grafikspeicher. Hardwaretests für alle Tasten, Stick-Deadzone, Trigger-Endlagen sowie
+Disconnect/Reconnect stehen noch aus. Die Abfragefrequenz bleibt vorerst durch
+das bestehende `delay(100)` begrenzt; sehr kurze Tastendrücke können verpasst werden.
+
+Prüfstand dieser Erweiterung: Ein temporärer Host-Test mit Bluepad32-Testdouble
+prüfte Tastenmapping, Flanken, Snapshot, Wertebegrenzung und Controllerwechsel
+erfolgreich. `Controller.cpp` ließ sich mit der ESP32-Toolchain und den tatsächlichen
+Projekt-Headern kompilieren. Der vollständige `pio run -e esp32dev` scheiterte im
+Build-Werkzeug an `No module named 'SCons.Tool.FortranCommon'`; ein erfolgreicher
+Firmware-Build und der Hardwaretest stehen daher noch aus.
 
 ## Geplante nächste Schritte
 

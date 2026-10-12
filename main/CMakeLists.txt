@@ -11,6 +11,7 @@ set(requires
     "bluepad32_arduino"
     "arduino"
     "btstack"
+    "gameduino2"
 )
 
 idf_component_register(
