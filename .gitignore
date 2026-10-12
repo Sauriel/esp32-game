@@ -1,0 +1,48 @@
+# PlatformIO
+.pio/
+.pioenvs/
+.piolibdeps/
+
+# ESP-IDF
+build/
+sdkconfig
+sdkconfig.old
+sdkconfig.*.old
+managed_components/
+dependencies.lock
+
+# CMake
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+compile_commands.json
+
+# Editor / IDE
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.swp
+*.swo
+*.autosave
+
+# OS
+.DS_Store
+Thumbs.db
+._*
+
+# Temporary files
+*.log
+*.tmp
+*.bak
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# External ESP-IDF components
+/components/arduino/
+/components/bluepad32/
+/components/btstack/
+/components/cmd_nvs/
+/components/cmd_system/
