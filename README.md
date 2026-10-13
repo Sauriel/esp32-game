@@ -9,6 +9,7 @@ Entwickelt wird mit **C++**, **PlatformIO**, **ESP-IDF**, **Arduino als ESP-IDF-
 - Gameduino-2-Display über SPI ansteuern (480 × 272 Pixel)
 - DualShock-4-Controller über Bluepad32 verbinden und Eingaben auslesen
 - Spieler vom linken Stick bewegen; Sprite aus `/player.png` mit vier Blickrichtungen und Gehframes (Hardwareprüfung ausstehend)
+- Fester texturierter Raum mit MZ-Autotiles aus `/tiles`, oberer Wand und Fussbox-Kollision (Hardwareprüfung ausstehend)
 - Hauptmenü mit SD-Hintergrund `/system/title.png` und Auswahl „Spielen“ / „Demo“
 - Zwei-Block-Demo in `main/game/GameTestScreen.cpp`, über das Menü erreichbar
 - Tastendrücke oben mittig für eine Sekunde anzeigen (z. B. `X (Cross) Pressed`)
@@ -16,7 +17,7 @@ Entwickelt wird mit **C++**, **PlatformIO**, **ESP-IDF**, **Arduino als ESP-IDF-
 - Zeitbasierte Bewegung mit Delta-Time und einer Zielrate von maximal 60 Frames/s
 - FPS-Anzeige oben rechts, gemessen über vollständige Frameintervalle und einmal pro Sekunde aktualisiert
 
-**Noch nicht umgesetzt:** eigentliche Spielmechaniken, Karten oder Audio. Sprite-Laden und Darstellung sind implementiert, aber noch nicht auf Hardware bestätigt. Die Hauptschleife muss noch auf der Hardware gemessen werden.
+**Noch nicht umgesetzt:** zufällige Dungeons, Kampf, Interaktionen oder Audio. Sprite-/Tile-Laden, Raumdarstellung und Kollision sind implementiert, aber noch nicht auf Hardware bestätigt. Die Hauptschleife muss noch auf der Hardware gemessen werden.
 
 ### Hauptmenü und Titelbild von SD
 
@@ -58,10 +59,11 @@ und Anzeige auf Hardware sind noch durch den Benutzer zu prüfen.
 Das Titelbild verwendet **Bitmap-Handle 1**, 480 Byte Stride und **65.280 Byte**
 RAM_G ab Adresse **55.296** (4-Byte-alignt). Der Spieler behält Handle 0 und die
 ersten 55.296 Byte. Beide Ressourcen können gleichzeitig resident bleiben:
-**120.576 Byte reserviert, 141.568 Byte unverplant**. Demo und Menütext benötigen
+**120.576 Byte für Spieler und Titel reserviert**; die Raum-Tiles reservieren weitere
+73.728 Byte (siehe unten), insgesamt bleiben **67.840 Byte unverplant**. Demo und Menütext benötigen
 keine zusätzlichen Bitmapdaten; es gibt keinen Fullscreen-Framebuffer.
 Beim Menü-/Demowechsel erfolgt kein SD-Transfer. Der Spieler wird bei jedem Start
-von „Spielen“ geladen. SD-Mount und SPI-Mutex werden bei wiederholtem Start
+von „Spielen“ gemeinsam mit den Raum-Tiles geladen. SD-Mount und SPI-Mutex werden bei wiederholtem Start
 wiederverwendet; auch die Demo zeichnet unter der gemeinsamen SPI-Sperre.
 
 `app/GameMode` koordiniert die drei Ansichten, `game/MainMenu` die Auswahl und
@@ -97,9 +99,9 @@ stärkere Achse die Blickrichtung; bei Gleichstand die vertikale Achse.
 
 Stillstand und Disconnect zeigen die mittlere Spalte der zuletzt gewählten
 Blickrichtung. Bei tatsächlicher Bewegung läuft zeitbasiert die Folge
-**Mitte → Links → Mitte → Rechts**, mit 140 ms je Schritt. Am Bildschirmrand bleibt
-die Figur vollständig unterhalb der 32-Pixel-Statusleiste. Das Renderrechteck ist
-hier nur eine Bildschirmbegrenzung; eine Welt-/Kollisionsbox ist noch nicht umgesetzt.
+**Mitte → Links → Mitte → Rechts**, mit 140 ms je Schritt. Die Raum-Kollision verwendet
+jetzt eine separate 16 × 12 Pixel grosse Fussbox (siehe unten). Das Sprite darf
+die Wand optisch überlappen; die Statusleiste liegt über der oberen Decke.
 Der rechte Stick bewegt im neuen Screen keinen zweiten Block. Tastenanzeige,
 FPS, Bluetooth und KEY-Moduswechsel bleiben angebunden.
 
@@ -124,7 +126,7 @@ es gibt keinen Lade-Retry im Frame-Loop. Nach Austausch der Datei das Spiel neu 
 `PlayerSprite.cpp` konvertiert die Zeilen zu **ARGB4, little-endian** und packt sie
 frameweise in FT800 RAM_G. Zwölf Frames mit je 48 × 48 × 2 Byte belegen
 **55.296 Byte**, ab Adresse 0, mit 4-Byte-alignten Frameanfängen und Bitmap-Handle 0.
-Mit dem zusätzlichen Titelbild bleiben **141.568 Byte** für spätere Ressourcen
+Mit Titelbild und Raum-Tiles bleiben **67.840 Byte** für spätere Ressourcen
 unverplant. ARGB4 reduziert Farbe
 und Alpha auf jeweils vier Bit. Pro Frame werden ein Bitmap mit 96-Byte-Stride,
 48-Zeilen-Zellen und genau ein Sprite-Vertex ausgegeben, ohne Framebuffer.
@@ -152,6 +154,88 @@ Gehfolge, Bildschirmränder und Disconnect/Reconnect prüfen. Ladezeit, Heaprese
 mit aktivem Bluetooth und FPS aus den Logs/Display erfassen. Zusätzlich fehlende
 SD/PNG, falsche Dimensionen und beschädigte PNG sowie Wechsel zu Transfer und
 zurück prüfen. Der vollständige Firmware-/Flash-/RAM-Bericht steht aus.
+
+### Texturierter Raum und Kollision
+
+„Spielen“ lädt zusätzlich die unveränderten Quelldateien aus dem SD-Ordner `/tiles`:
+
+| Datei auf SD | PNG-Abmessungen | Format in RAM_G | Adresse | Bytes | Handle |
+| --- | --- | --- | --- | --- | --- |
+| `/tiles/floor.png` | 96 × 144 | ARGB4 | 120.576 | 27.648 | 2 |
+| `/tiles/wall.png` | 96 × 96 | ARGB4 | 148.224 | 18.432 | 3 |
+| `/tiles/ceiling.png` | 96 × 144 | ARGB4 | 166.656 | 27.648 | 4 |
+
+Es gelten dieselben PNG-Formate wie beim Spieler, maximal 256 KiB je Tiledatei.
+Alle drei Sheets müssen exakt die oben angegebenen Abmessungen haben;
+abweichende Grössen werden mit Fehlermeldung abgewiesen. Es erfolgt keine
+automatische Ergänzung fehlender Pixelspalten.
+Der vorhandene ESP32-Decoder lädt die drei Sheets nacheinander; sein temporärer
+Workspace bleibt auf 52 KiB begrenzt und wird zwischen den Dateien freigegeben.
+Es gibt keinen zusätzlichen Bildpuffer, keine neue Library und keinen SD-Zugriff
+im laufenden Rendering. Die gemeinsame SPI-Sperre und die bestehenden Pins bleiben
+erhalten. Laden erfolgt bei jeder Auswahl von „Spielen“; geänderte SD-Dateien
+werden dadurch übernommen. Während dieser synchronen Ladephase wird die
+Controller-/KEY-Abfrage erst nach dem Laden fortgesetzt; Ladezeiten auf Hardware messen.
+
+`assets/RoomTiles` schreibt jedes Sheet zeilenweise in **24 × 24 Pixel grosse
+Teilbilder**, vier Teilbildspalten pro Sheet. Speicherreihenfolge: zuerst alle
+Pixelzeilen des Teilbilds links oben, dann das nächste Teilbild rechts davon;
+nach vier Teilbildern folgt die nächste Teilbildreihe. Jedes Teilbild benötigt
+1.152 Byte, Stride 48 Byte, ARGB4 little-endian, vier Bit je Farb-/Alpha-Kanal,
+4-Byte-alignt. Boden und Decke haben je 24 Teilbilder, die Wand 16. Die oberen
+48 × 48 Pixel bei Boden/Decke sind die MZ-Vorschau und werden nicht als fertiges
+Tile wiederholt. Vier anhand der Nachbarn ausgewählte Teilbilder ergeben ein
+48 × 48 Pixel grosses Tile, einschließlich Aussen- und Innenecken der Decke.
+Die Wand verwendet das 96 × 96-MZ-Wandlayout ohne Vorschau.
+Diese erste Umsetzung unterstützt statische Boden-/Decken-/Wand-Autotiles;
+Wasseranimationen und Counter-/Table-Sonderregeln sind nicht enthalten.
+Layoutreferenz: [MZ Asset Standards](https://rpgmakerofficial.com/product/MZ_help-en/01_11_01.html).
+
+Der Raum nutzt bewusst **48 Pixel Darstellung pro Tile** ohne Skalierung oder
+Kamera: oben Decke von y=0 bis 48, darunter eine 96 Pixel hohe Wand bis y=144;
+links/rechts je 48 Pixel Decke und unten 48 Pixel Decke ab y=224. Damit bleibt
+ein **384 × 80 Pixel** grosser Bodenbereich (x=48…432, y=144…224).
+Die Statusleiste überlagert die oberen 32 Pixel. Der Raum hat zehn Spalten und
+sechs Materialreihen; die vorletzte Reihe ist wegen der 272-Pixel-Displayhöhe
+nur 32 Pixel hoch. Dort werden beide 24-Pixel-Teilbildhälften innen um je acht
+Pixel gekürzt, damit die oberen/unteren Autotile-Ränder erhalten bleiben.
+Das ist eine Anpassung dieses festen Screens, kein allgemeines Dungeon-Dateiformat.
+Für grössere Dungeons sind Rendermaßstab und Kamera weiterhin zu entscheiden.
+
+`world/Room` hält 60 ein Byte grosse Material-IDs getrennt von den Texturen.
+Boden ist begehbar, Wand und Decke sind solide. Die **16 × 12 Pixel** grosse
+Fussbox liegt horizontal mittig im Spieler-Sprite, vertikal 12…24 Pixel unter
+seinem Mittelpunkt. Ihre Abmessungen sind ein vorläufiger Gameplayparameter;
+transparente Bildränder spielen bei der Kollision keine Rolle. Der Spieler startet
+mit seiner Fussbox in der Bodenmitte. Die Bewegung prüft zuerst X, dann Y gegen
+die soliden Raumrechtecke und begrenzt auch grosse Bewegungsschritte an der ersten
+Kante. An einer Wand ist damit seitliches Gleiten möglich. Gehframes laufen nur,
+wenn sich die Figur tatsächlich bewegt. Der Renderer zeichnet Boden/Wand,
+anschliessend den Spieler und zuletzt die Decke als Vordergrund.
+Eine zufällige Dungeon-Erzeugung ist noch nicht implementiert.
+
+Bei fehlender, beschädigter oder falsch dimensionierter Tiledatei bleibt die
+betroffene Materialgruppe einfarbig, mit unveränderter Kollision. Der Screen nennt
+die erste fehlerhafte Datei; das serielle Log nennt Pfad und Fehlergrund für alle
+fehlerhaften Dateien. Die Loader protokollieren Ladezeiten und Heapdiagnosen.
+Spieler, Titel und alle drei Sheets belegen zusammen **194.304 von 262.144 Byte
+RAM_G**, **67.840 Byte unverplant**. Es gibt keine zusätzliche Grafik-Reserve
+ausserhalb dieses Restes und keinen Fullscreen-Framebuffer. Pro Bild werden
+höchstens 60 Tiles beziehungsweise 240 Teilbilder gezeichnet. Die Raumkommandos
+benötigen rechnerisch weniger als 2,5 KiB Displayliste; Sprite und ROM-Texte kommen
+hinzu. Die vorhandene FIFO-Verwaltung und `GD.finish()` bleiben erhalten;
+tatsächliche Gesamt-Displaylistengrösse und Framerate sind auf Hardware zu messen.
+
+**Prüfstand:** nur statische Quellcodedurchsicht; kein Build und keine Tests durch
+den Agenten. Zur manuellen Abnahme selbst `pio run -e esp32dev` bauen und hochladen.
+Im Menü „Spielen“ wählen und insbesondere Decken-Aussen-/Innenecken, nahtlosen Boden,
+obere/untere Wandkante und die gekürzte Bodenreihe prüfen. Alle vier Raumgrenzen
+und diagonales Gleiten mit dem Stick prüfen: die Fussbox bleibt auf dem Boden,
+die Spriteoberkante darf vor der Wand liegen. Ausrichtung/Animation bei blockierter
+Bewegung, Disconnect/Reconnect, mehrfache Menü-/Demo-/Spielwechsel sowie KEY-/Transfer-
+Rückkehr prüfen. Fehlende/falsche/beschädigte Tiledatei muss eine Ersatzfläche und
+Fehlermeldung erzeugen. Heap/grössten Block/Minimum mit Bluetooth, Ladezeiten, FPS,
+RAM_G-/Displaylistenbelegung und den Firmware-Flash-/RAM-Bericht dokumentieren.
 
 ## Hardware
 
@@ -706,7 +790,8 @@ Noch durchzuführen:
 
 - Tatsächliche Framerate und Eingabereaktion der Delta-Time-Schleife auf der Hardware messen
 - Spielfigur und Sprite-Darstellung
-- Tilemap, Kollisionen und grundlegende 2D-Spielmechaniken
+- Raumdaten/Kamera für grössere und später zufällige Dungeons erweitern
+- Grundlegende 2D-Spielmechaniken ergänzen
 - Weitere Controller-Aktionen
 
 ## Hinweise

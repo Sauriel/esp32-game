@@ -11,10 +11,6 @@
 
 namespace TitleBackground {
 namespace {
-constexpr unsigned sourceWidth = 480, sourceHeight = 272;
-constexpr unsigned width = sourceWidth / 2, height = sourceHeight / 2;
-constexpr uint32_t address = PlayerSprite::bytes;
-constexpr uint32_t bytes = width * height * 2;
 constexpr size_t fileLimit = PlayerPng::maxFileBytes;
 static_assert(address % 4 == 0 && address + bytes <= 256 * 1024,
               "Title and player exceed RAM_G budget");

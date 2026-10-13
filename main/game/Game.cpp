@@ -6,6 +6,8 @@
 #include <cstdio>
 #include <cmath>
 #include "assets/PlayerSprite.h"
+#include "assets/RoomTiles.h"
+#include "world/Room.h"
 #include "storage/SdStorage.h"
 
 namespace Game {
@@ -15,6 +17,9 @@ namespace Game {
         constexpr float moveSpeedPixelsPerSecond = 80.0f;
 
         constexpr int playerHalfSize = PlayerSprite::frameSize / 2;
+        // 16x12px-Fussbox, unabhaengig vom 48x48px-Renderrechteck.
+        constexpr float bodyWidth = 16.0f, bodyHeight = 12.0f;
+        constexpr float bodyOffsetY = 12.0f;
         constexpr float walkFrameSeconds = 0.14f;
         constexpr uint8_t walkColumns[] = {1, 0, 1, 2};
         constexpr int statusHeight = 32;
@@ -60,16 +65,19 @@ namespace Game {
         };
 
         void movePlayer(float deltaX, float deltaY) {
-            player.x = constrain(player.x + deltaX,
-                                 float(playerHalfSize), float(480 - playerHalfSize));
-            player.y = constrain(player.y + deltaY,
-                                 float(statusHeight + playerHalfSize), float(272 - playerHalfSize));
+            Room::Box body{player.x - bodyWidth / 2, player.y + bodyOffsetY,
+                           bodyWidth, bodyHeight};
+            Room::move(body, deltaX, deltaY);
+            player.x = body.x + bodyWidth / 2;
+            player.y = body.y - bodyOffsetY;
         }
 
     }
 
     void begin() {
-        player = {240.0f, 136.0f};
+        Room::begin();
+        player = {(Room::floorLeft + Room::floorRight) / 2.0f,
+                  (Room::floorTop + Room::floorBottom) / 2.0f - bodyOffsetY - bodyHeight / 2};
         direction = 0;
         walkStep = 0;
         walkElapsed = 0;
@@ -78,6 +86,7 @@ namespace Game {
         buttonMessage = nullptr;
         buttonPressedAt = 0;
         if (!PlayerSprite::load()) Serial.println(PlayerSprite::error());
+        if (!RoomTiles::load()) Serial.println(RoomTiles::error());
     }
 
     void update(const GameInput::InputState& input, float deltaTime) {
@@ -124,15 +133,28 @@ namespace Game {
         if (!guard.acquired()) return;
         GD.ClearColorRGB(15, 25, 65);
         GD.Clear();
+        RoomTiles::drawGround();
 
         PlayerSprite::draw(static_cast<int>(player.x) - playerHalfSize,
                            static_cast<int>(player.y) - playerHalfSize,
                            direction, walking ? walkColumns[walkStep] : 1);
+        RoomTiles::drawCeiling();
         if (!PlayerSprite::ready()) {
             GD.ColorRGB(255, 180, 50);
-            GD.cmd_text(240, 136, 26, OPT_CENTER, PlayerSprite::error());
+            GD.cmd_text(240, 184, 26, OPT_CENTER, PlayerSprite::error());
+        }
+        if (RoomTiles::error()) {
+            GD.ColorRGB(255, 180, 50);
+            GD.cmd_text(240, 242, 26, OPT_CENTER, "Tile fehlt/ungueltig:");
+            GD.cmd_text(240, 260, 20, OPT_CENTER, RoomTiles::error());
         }
 
+        GD.ColorRGB(0, 0, 0);
+        GD.ColorA(180);
+        GD.Begin(RECTS);
+        GD.Vertex2ii(0, 0); GD.Vertex2ii(Room::width, statusHeight);
+        GD.End();
+        GD.ColorA(255);
         GD.ColorRGB(255, 255, 255);
         const char* status = controllerConnected
             ? (buttonMessage ? buttonMessage : "Press a button")

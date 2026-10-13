@@ -10,6 +10,8 @@ set(srcs
     "assets/TitleBackground.cpp"
     "assets/PlayerSprite.cpp"
     "assets/PlayerPng.cpp"
+    "assets/RoomTiles.cpp"
+    "world/Room.cpp"
     "timing/FrameTiming.cpp"
     "input/ModeButton.cpp"
     "app/BootMode.cpp"
