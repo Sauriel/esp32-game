@@ -4,6 +4,9 @@
 #include <SPI.h>
 #include <GD2.h>
 #include <cstdio>
+#include <cmath>
+#include "assets/PlayerSprite.h"
+#include "storage/SdStorage.h"
 
 namespace Game {
 
@@ -11,17 +14,22 @@ namespace Game {
         // Pixel pro Sekunde: zuvor 8 Pixel pro Update bei etwa 10 Updates/s.
         constexpr float moveSpeedPixelsPerSecond = 80.0f;
 
-        constexpr int blockHalfSize = 10;
+        constexpr int playerHalfSize = PlayerSprite::frameSize / 2;
+        constexpr float walkFrameSeconds = 0.14f;
+        constexpr uint8_t walkColumns[] = {1, 0, 1, 2};
         constexpr int statusHeight = 32;
         constexpr uint32_t buttonMessageDurationMs = 1000;
 
-        struct Block {
+        struct Player {
             float x;
             float y;
         };
 
-        Block leftBlock = {160.0f, 136.0f};
-        Block rightBlock = {320.0f, 136.0f};
+        Player player = {240.0f, 136.0f};
+        uint8_t direction = 0; // Down, Left, Right, Up = Sheetreihen.
+        unsigned walkStep = 0;
+        float walkElapsed = 0;
+        bool walking = false;
         bool controllerConnected = false;
         const char* buttonMessage = nullptr;
         uint32_t buttonPressedAt = 0;
@@ -51,39 +59,52 @@ namespace Game {
             {&GameInput::InputState::ps, "PS Pressed"},
         };
 
-        void moveBlock(Block& block, float deltaX, float deltaY) {
-            block.x = constrain(block.x + deltaX,
-                                float(blockHalfSize), float(480 - blockHalfSize));
-            block.y = constrain(block.y + deltaY,
-                                float(statusHeight + blockHalfSize), float(272 - blockHalfSize));
+        void movePlayer(float deltaX, float deltaY) {
+            player.x = constrain(player.x + deltaX,
+                                 float(playerHalfSize), float(480 - playerHalfSize));
+            player.y = constrain(player.y + deltaY,
+                                 float(statusHeight + playerHalfSize), float(272 - playerHalfSize));
         }
 
-        void drawBlock(const Block& block) {
-            const int x = static_cast<int>(block.x);
-            const int y = static_cast<int>(block.y);
-            GD.Vertex2ii(x - blockHalfSize, y - blockHalfSize);
-            GD.Vertex2ii(x + blockHalfSize, y + blockHalfSize);
-        }
     }
 
     void begin() {
-        leftBlock = {160.0f, 136.0f};
-        rightBlock = {320.0f, 136.0f};
+        player = {240.0f, 136.0f};
+        direction = 0;
+        walkStep = 0;
+        walkElapsed = 0;
+        walking = false;
         controllerConnected = false;
         buttonMessage = nullptr;
         buttonPressedAt = 0;
+        if (!PlayerSprite::load()) Serial.println(PlayerSprite::error());
     }
 
     void update(const GameInput::InputState& input, float deltaTime) {
         controllerConnected = input.connected;
         if (!controllerConnected) {
             buttonMessage = nullptr;
+            walking = false; walkStep = 0; walkElapsed = 0;
             return;
         }
 
         const float movement = moveSpeedPixelsPerSecond * deltaTime;
-        moveBlock(leftBlock, input.moveX * movement, input.moveY * movement);
-        moveBlock(rightBlock, input.lookX * movement, input.lookY * movement);
+        if (input.moveX != 0 || input.moveY != 0) {
+            if (fabsf(input.moveX) > fabsf(input.moveY)) direction = input.moveX < 0 ? 1 : 2;
+            else direction = input.moveY < 0 ? 3 : 0;
+        }
+        const Player before = player;
+        movePlayer(input.moveX * movement, input.moveY * movement);
+        walking = player.x != before.x || player.y != before.y;
+        if (walking) {
+            walkElapsed += deltaTime;
+            while (walkElapsed >= walkFrameSeconds) {
+                walkElapsed -= walkFrameSeconds;
+                walkStep = (walkStep + 1) % 4;
+            }
+        } else {
+            walkElapsed = 0; walkStep = 0;
+        }
 
         const uint32_t now = millis();
         if (buttonMessage && now - buttonPressedAt >= buttonMessageDurationMs) {
@@ -99,15 +120,18 @@ namespace Game {
     }
 
     void render(float fps, const char* statusOverride) {
+        SdStorage::DisplayGuard guard;
+        if (!guard.acquired()) return;
         GD.ClearColorRGB(15, 25, 65);
         GD.Clear();
 
-        GD.Begin(RECTS);
-        GD.ColorRGB(255, 180, 50);
-        drawBlock(leftBlock);
-        GD.ColorRGB(70, 190, 255);
-        drawBlock(rightBlock);
-        GD.End();
+        PlayerSprite::draw(static_cast<int>(player.x) - playerHalfSize,
+                           static_cast<int>(player.y) - playerHalfSize,
+                           direction, walking ? walkColumns[walkStep] : 1);
+        if (!PlayerSprite::ready()) {
+            GD.ColorRGB(255, 180, 50);
+            GD.cmd_text(240, 136, 26, OPT_CENTER, PlayerSprite::error());
+        }
 
         GD.ColorRGB(255, 255, 255);
         const char* status = controllerConnected

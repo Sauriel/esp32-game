@@ -2,6 +2,14 @@
 
 > Verbindliche Projektanweisungen für KI-Coding-Agenten. Diese Datei beschreibt die **tatsächliche Hardware**, den **bereits getesteten Projektstand** und die **technischen Grenzen** eines eigenständigen Zelda-artigen 2D-Dungeonspiels. **Vor jeder Änderung `README.md`, `platformio.ini`, `sdkconfig.defaults` sowie den relevanten Quellcode lesen.** Diese Datei ist keine Behauptung, dass geplante Features bereits funktionieren.
 
+## Verbindliche Zuständigkeit für Tests und Builds
+
+- **Keine Tests erstellen, ergänzen oder ausführen.** Das gilt auch für temporäre Tests, Hosttests, Testdoubles und Testskripte. Vorhandene Tests bleiben erhalten.
+- **Nicht selbst kompilieren oder Builds starten.** Weder `pio run` noch direkte Compileraufrufe, Teil-Builds oder alternative Buildwerkzeuge ausführen. Firmware nicht hochladen und keine Hardwaretests starten.
+- **Der Benutzer übernimmt Kompilieren, Tests und Upload.** Nach Änderungen die nötigen manuellen Prüfschritte und noch unbestätigten Ergebnisse knapp benennen; keinen Build-Erfolg ohne entsprechenden Benutzerbericht behaupten.
+- Quellcode lesen, Änderungen vornehmen und statisch durchsehen ist weiterhin erlaubt. Ein vom Benutzer ausdrücklich gewünschter Testscreen ist Anwendungscode und darf erhalten werden; diese Ausnahme erlaubt keine automatisierten Tests.
+- Diese Vorgaben haben Vorrang vor allen nachfolgenden Build- und Testempfehlungen. Die dort genannten Befehle und Prüfungen richten sich an den Benutzer.
+
 ## 1. Ziel und Nichtziele
 
 - Entwickle ein eigenständiges, lokal auf der Hardware laufendes **2D-Top-down-Dungeon-Action-Adventure im Stil klassischer Zelda-Spiele**: Erkundung, Spielfigur, Kollisionen, Gegner, Kämpfe, Interaktionen, Türen, Schlüssel, Rätsel, Inventar und später ggf. Speichern/Laden.
@@ -83,7 +91,7 @@
 - Die Struktur unter `main/display/`, `main/game/`, `main/input/` **weiterverwenden**; neue Systeme sinnvoll ergänzen (z. B. `assets/`, `world/`, `combat/`), statt alles in eine große Datei zu schreiben.
 - **Keine projektfremde API erfinden**: Header, Signaturen, tatsächlich eingesetzte Gameduino-Version und Controller-Datenstrukturen im Repository prüfen.
 
-### Standardbefehle
+### Standardbefehle für den Benutzer (nicht vom Agenten ausführen)
 
 ```sh
 bash setup-deps.sh         # nur falls Abhängigkeiten fehlen; nicht blind überschreiben
@@ -173,7 +181,7 @@ Bei RAM-/Performance-relevanten Änderungen im Debug-Build soweit möglich proto
 **Definition of Done für eine Codeänderung:**
 
 1. Bestehende Verdrahtung und die funktionierende Bluetooth-/Displayintegration bleiben erhalten.
-2. Kompiliert soweit lokal möglich mit `pio run -e esp32dev`; **Build-Erfolg nicht behaupten, wenn nicht tatsächlich ausgeführt**.
+2. Änderungen zum Benutzer-Build mit `pio run -e esp32dev` bereitstellen; der Agent kompiliert nicht. Ausstehende Kompilierung deutlich benennen und Build-Erfolg nur nach entsprechender Bestätigung durch den Benutzer berichten.
 3. Ressourcenlimits nachweislich eingehalten oder die noch nötige Messung deutlich benannt.
 4. Keine zusätzlichen Hardcoded-Pins, ungeprüften API-Behauptungen oder unkontrollierten großen Heap-/VRAM-Allokationen.
 5. Neu eingeführte Eingaben und Spielmechaniken sind von Hardwaredetails sinnvoll entkoppelt.
@@ -182,12 +190,12 @@ Bei RAM-/Performance-relevanten Änderungen im Debug-Build soweit möglich proto
 ## 10. Arbeitsweise für Coding-Agenten
 
 - **Zuerst Bestand prüfen, dann patchen.** Relevante Dateien, Compilerflags, PIO-Konfiguration, Komponenten und vorhandene Schnittstellen lesen. Bestehende funktionierende Integrationen nicht „aufräumen“, bis ihre Rolle verstanden ist.
-- **Kleine und prüfbare Änderungen**, vorzugsweise pro Schritt ein Ziel. Bei großen Features vorher kurz Architektur, benötigten RAM/VRAM und Testplan nennen.
+- **Kleine und prüfbare Änderungen**, vorzugsweise pro Schritt ein Ziel. Bei großen Features vorher kurz Architektur, benötigten RAM/VRAM und manuelle Prüfschritte für den Benutzer nennen; keine Tests erstellen oder ausführen.
 - **Verifiziert vs. angenommen vs. geplant** klar kennzeichnen. SD-Zugriff, Sound, MZ-Asset-Importer oder bestimmte FT800-Kommandos niemals als implementiert ausgeben, wenn sie nicht im Code stehen und geprüft sind.
 - Keine beliebigen Libraries, inkompatiblen Frameworks oder ESP32-Varianten hinzufügen; Auswirkungen auf Flash, Heap, Bluetooth und SPI erklären.
 - Keine Änderungen an Boardpinning, Partitionstabelle, Bluepad32/BTstack oder fremden Gameduino-Treibercode ohne nachvollziehbaren Grund und Hinweis auf Regressionstests.
 - Bevorzugt **C++** für Firmware. **Python/Node.js/TypeScript** sind optional für Offline-Asset-Tools auf dem Entwicklungs-PC, **nicht** als Laufzeit des ESP32-Spiels.
-- Spiellogik PC-seitig soweit möglich isoliert testbar halten, ohne vorzugeben, dass ein Desktop-Test die echte Hardware vollständig ersetzt.
+- Spiellogik von Hardwaredetails entkoppelt halten. Der Agent erstellt und startet auch dafür keine Hosttests.
 - Den Benutzer über Entscheidungen mit großen Auswirkungen (Rendermaßstab, SD-Dateiformat, Speicheraufteilung, Kampfsteuerung, Austausch von Bibliotheken) informieren; keine stillschweigenden Designfestlegungen als Hardwarezwang darstellen.
 
 ## 11. Offene Entscheidungen / zuerst zu verifizieren

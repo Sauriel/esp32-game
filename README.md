@@ -1,6 +1,6 @@
 # ESP32 Gameduino 2 Game
 
-Ein kleines 2D-Spielprojekt für einen **ESP32** mit **Gameduino 2 (FT800)** und einem **PlayStation-4-Controller** über Bluetooth. Das Projekt ist noch ein Prototyp: Die Testszene enthält zwei unabhängig steuerbare Blöcke und eine Anzeige für Tastendrücke.
+Ein kleines 2D-Spielprojekt für einen **ESP32** mit **Gameduino 2 (FT800)** und einem **PlayStation-4-Controller** über Bluetooth. Der neue Spielscreen lädt einen animierten Spieler von SD; der bisherige Zwei-Block-Testscreen bleibt als separate Kopie erhalten. Die Sprite-Darstellung ist noch auf Hardware zu prüfen.
 
 Entwickelt wird mit **C++**, **PlatformIO**, **ESP-IDF**, **Arduino als ESP-IDF-Komponente** und **Bluepad32**.
 
@@ -8,13 +8,80 @@ Entwickelt wird mit **C++**, **PlatformIO**, **ESP-IDF**, **Arduino als ESP-IDF-
 
 - Gameduino-2-Display über SPI ansteuern (480 × 272 Pixel)
 - DualShock-4-Controller über Bluepad32 verbinden und Eingaben auslesen
-- Zwei Blöcke mit linkem und rechtem Analogstick bewegen und innerhalb des Spielbereichs halten
+- Spieler vom linken Stick bewegen; Sprite aus `/player.png` mit vier Blickrichtungen und Gehframes (Hardwareprüfung ausstehend)
+- Ursprüngliche Zwei-Block-Demo unverändert in `main/game/GameTestScreen.cpp` gesichert
 - Tastendrücke oben mittig für eine Sekunde anzeigen (z. B. `X (Cross) Pressed`)
 - Spiellogik, Eingabeverarbeitung und Displayinitialisierung in getrennten Modulen
 - Zeitbasierte Bewegung mit Delta-Time und einer Zielrate von maximal 60 Frames/s
 - FPS-Anzeige oben rechts, gemessen über vollständige Frameintervalle und einmal pro Sekunde aktualisiert
 
-**Noch nicht umgesetzt:** eigentliche Spielmechaniken, Sprites, Karten oder Audio. Die neue Hauptschleife muss noch auf der Hardware gemessen werden.
+**Noch nicht umgesetzt:** eigentliche Spielmechaniken, Karten oder Audio. Sprite-Laden und Darstellung sind implementiert, aber noch nicht auf Hardware bestätigt. Die Hauptschleife muss noch auf der Hardware gemessen werden.
+
+### Spieler-Sprite von SD
+
+Im Game-Modus wird `/player.png` einmal beim Start über die vorhandene Arduino-SD-
+Anbindung geladen. Erwartet wird ein **144 × 192 Pixel** grosses Sheet: drei Spalten,
+vier Reihen in der Reihenfolge **unten, links, rechts, oben**. Jeder Frame wird
+zunächst unskaliert mit **48 × 48 Pixeln** dargestellt. Der linke Stick bewegt den
+Spieler mit unverändert 80 Pixeln/s pro Achse. Bei diagonaler Eingabe bestimmt die
+stärkere Achse die Blickrichtung; bei Gleichstand die vertikale Achse.
+
+Stillstand und Disconnect zeigen die mittlere Spalte der zuletzt gewählten
+Blickrichtung. Bei tatsächlicher Bewegung läuft zeitbasiert die Folge
+**Mitte → Links → Mitte → Rechts**, mit 140 ms je Schritt. Am Bildschirmrand bleibt
+die Figur vollständig unterhalb der 32-Pixel-Statusleiste. Das Renderrechteck ist
+hier nur eine Bildschirmbegrenzung; eine Welt-/Kollisionsbox ist noch nicht umgesetzt.
+Der rechte Stick bewegt im neuen Screen keinen zweiten Block. Tastenanzeige,
+FPS, Bluetooth und KEY-Moduswechsel bleiben angebunden.
+
+Der FT800 dekodiert PNG nicht selbst. `main/assets/PlayerPng.cpp` verwendet den
+bereits in ESP-IDF enthaltenen ESP32-ROM-Inflater (`tinfl_decompress` aus `miniz.h`)
+und rekonstruiert PNG-Zeilen auf dem ESP32. Unterstützt werden nicht-interlaced
+8-Bit-Graustufen, RGB, Graustufen mit Alpha und RGBA sowie Palettenbilder mit
+1/2/4/8 Bit und `tRNS`-Transparenz. 16-Bit- und Adam7-PNG werden mit Fehlermeldung
+abgewiesen. Dateigrösse ist auf 256 KiB und die Zahl der Chunks auf 4096 begrenzt;
+PNG-Chunk-CRC, zlib-Prüfsumme und erwartete Pixelzahl werden geprüft.
+
+Es wird kein vollständiges Bild im ESP32-Heap gehalten. Ein temporärer Heapblock
+enthält das 32-KiB-Inflate-Wörterbuch, den Decoderzustand, zwei PNG-Zeilen,
+Palette und kleine Ein-/Ausgabepuffer; `static_assert` begrenzt ihn auf **48 KiB**.
+Seine tatsächliche Bytegrösse sowie freier Heap, grösster interner Block und
+Low-Watermark vor, während und nach dem Laden werden seriell protokolliert.
+Ein fehlgeschlagener Speicherzugriff oder eine unlesbare/falsche PNG wird angezeigt;
+es gibt keinen Lade-Retry im Frame-Loop. Nach Austausch der Datei das Spiel neu starten.
+
+`PlayerSprite.cpp` konvertiert die Zeilen zu **ARGB4, little-endian** und packt sie
+frameweise in FT800 RAM_G. Zwölf Frames mit je 48 × 48 × 2 Byte belegen
+**55.296 Byte**, ab Adresse 0, mit 4-Byte-alignten Frameanfängen und Bitmap-Handle 0.
+**206.848 Byte** bleiben für spätere Ressourcen unverplant. ARGB4 reduziert Farbe
+und Alpha auf jeweils vier Bit. Pro Frame werden ein Bitmap mit 96-Byte-Stride,
+48-Zeilen-Zellen und genau ein Sprite-Vertex ausgegeben, ohne Framebuffer.
+Die Textanzeige nutzt weiterhin die FT800-Schrift. SD-Lesen und Displayzugriff
+verwenden abwechselnd dieselbe vorhandene SPI-Sperre und getrennte Transaktionen;
+im laufenden Spiel erfolgen keine SD-Lesezugriffe für die Animation.
+
+Die Kopie `main/game/GameTestScreen.cpp` entspricht exakt dem vorherigen `Game.cpp`.
+Zum Bauen der Block-Demo in `main/CMakeLists.txt` den Eintrag `game/Game.cpp`
+durch `game/GameTestScreen.cpp` ersetzen. **Nur einen der beiden Screens einbinden**,
+da beide die gleiche `Game`-Schnittstelle implementieren. Die Assetquellen können
+in der Quellliste bleiben; der alte Screen ruft sie nicht auf.
+
+Prüfstand: Ein Zwischenstand der drei neuen/geänderten C++-Dateien wurde vor der neuen Vorgabe,
+keine Agenten-Builds/Tests auszuführen, einzeln mit dem vorhandenen ESP32-Compiler
+kompiliert. Ein vollständiger PlatformIO-Build gelang hier nicht: schreibgeschütztes
+PlatformIO-Core-Verzeichnis bzw. nicht verfügbares SCons-Paket. Vor der Vorgabe
+liefen isolierte PNG-Hostprüfungen mit zlib als ROM-Testdouble erfolgreich;
+die dafür neu erstellte Testdatei wurde auf Benutzerwunsch wieder entfernt.
+Die abschliessenden Anpassungen wurden nicht erneut kompiliert oder getestet.
+Diese Prüfungen bestätigen weder den ROM-Inflater auf Hardware noch das Display.
+**Weitere Builds, Tests und Uploads übernimmt ausschliesslich der Benutzer.**
+
+Für die manuelle Abnahme `/player.png` im SD-Wurzelverzeichnis bereitstellen,
+Firmware bauen/hochladen und Transparenz, alle vier Richtungen, Ruheframe,
+Gehfolge, Bildschirmränder und Disconnect/Reconnect prüfen. Ladezeit, Heapreserve
+mit aktivem Bluetooth und FPS aus den Logs/Display erfassen. Zusätzlich fehlende
+SD/PNG, falsche Dimensionen und beschädigte PNG sowie Wechsel zu Transfer und
+zurück prüfen. Der vollständige Firmware-/Flash-/RAM-Bericht steht aus.
 
 ## Hardware
 
@@ -133,7 +200,7 @@ Weitere Builds führt der Benutzer in VSCode aus.
 
 Die zusätzlich installierten Fremdkomponenten erscheinen ebenfalls unter `components/`, sind aber durch `.gitignore` vom Repository ausgeschlossen.
 
-## Bedienung
+## Bedienung des gesicherten Block-Testscreens (bisheriger Stand)
 
 1. ESP32 mit dem Gameduino 2 verbinden und einschalten.
 2. DualShock 4 per Bluetooth mit Bluepad32 koppeln.

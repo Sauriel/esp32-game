@@ -3,7 +3,9 @@ set(srcs
     "main.cpp"
     "input/Controller.cpp"
     "display/Display.cpp"
-    "game/Game.cpp"
+    "game/Game.cpp" # Alternativ: game/GameTestScreen.cpp (originale Block-Demo)
+    "assets/PlayerSprite.cpp"
+    "assets/PlayerPng.cpp"
     "timing/FrameTiming.cpp"
     "input/ModeButton.cpp"
     "app/BootMode.cpp"
