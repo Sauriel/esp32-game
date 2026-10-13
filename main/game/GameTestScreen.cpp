@@ -1,11 +1,12 @@
-#include "Game.h"
+#include "GameTestScreen.h"
 
 #include <Arduino.h>
 #include <SPI.h>
 #include <GD2.h>
 #include <cstdio>
+#include "storage/SdStorage.h"
 
-namespace Game {
+namespace GameTestScreen {
 
     namespace {
         // Pixel pro Sekunde: zuvor 8 Pixel pro Update bei etwa 10 Updates/s.
@@ -99,6 +100,8 @@ namespace Game {
     }
 
     void render(float fps, const char* statusOverride) {
+        SdStorage::DisplayGuard guard;
+        if (!guard.acquired()) return;
         GD.ClearColorRGB(15, 25, 65);
         GD.Clear();
 

@@ -2,7 +2,7 @@
 #include "app/BootMode.h"
 #include "app/ModeSwitch.h"
 #include "display/Display.h"
-#include "game/Game.h"
+#include "app/GameMode.h"
 #include "input/Controller.h"
 #include "input/ModeButton.h"
 #include "timing/FrameTiming.h"
@@ -16,7 +16,7 @@ void setup() {
         TransferMode::begin();
     } else {
         GameInput::begin();
-        Game::begin();
+        GameMode::begin();
         app_log_heap("Game bereit");
     }
 }
@@ -27,8 +27,8 @@ void loop() {
         TransferMode::update();
     } else {
         GameInput::update();
-        Game::update(GameInput::getInput(), deltaTime);
-        Game::render(FrameTiming::fps(), ModeSwitch::status());
+        GameMode::update(GameInput::getInput(), deltaTime);
+        GameMode::render(FrameTiming::fps(), ModeSwitch::status());
     }
     ModeSwitch::update();
     FrameTiming::endFrame();

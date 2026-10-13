@@ -1,6 +1,6 @@
 # ESP32 Gameduino 2 Game
 
-Ein kleines 2D-Spielprojekt für einen **ESP32** mit **Gameduino 2 (FT800)** und einem **PlayStation-4-Controller** über Bluetooth. Der neue Spielscreen lädt einen animierten Spieler von SD; der bisherige Zwei-Block-Testscreen bleibt als separate Kopie erhalten. Die Sprite-Darstellung ist noch auf Hardware zu prüfen.
+Ein kleines 2D-Spielprojekt für einen **ESP32** mit **Gameduino 2 (FT800)** und einem **PlayStation-4-Controller** über Bluetooth. Ein Hauptmenü bietet den Spielscreen mit animiertem SD-Spieler und die bisherige Zwei-Block-Demo an. Menü und Sprite-Darstellung sind noch auf Hardware zu prüfen.
 
 Entwickelt wird mit **C++**, **PlatformIO**, **ESP-IDF**, **Arduino als ESP-IDF-Komponente** und **Bluepad32**.
 
@@ -9,13 +9,82 @@ Entwickelt wird mit **C++**, **PlatformIO**, **ESP-IDF**, **Arduino als ESP-IDF-
 - Gameduino-2-Display über SPI ansteuern (480 × 272 Pixel)
 - DualShock-4-Controller über Bluepad32 verbinden und Eingaben auslesen
 - Spieler vom linken Stick bewegen; Sprite aus `/player.png` mit vier Blickrichtungen und Gehframes (Hardwareprüfung ausstehend)
-- Ursprüngliche Zwei-Block-Demo unverändert in `main/game/GameTestScreen.cpp` gesichert
+- Hauptmenü mit SD-Hintergrund `/system/title.png` und Auswahl „Spielen“ / „Demo“
+- Zwei-Block-Demo in `main/game/GameTestScreen.cpp`, über das Menü erreichbar
 - Tastendrücke oben mittig für eine Sekunde anzeigen (z. B. `X (Cross) Pressed`)
 - Spiellogik, Eingabeverarbeitung und Displayinitialisierung in getrennten Modulen
 - Zeitbasierte Bewegung mit Delta-Time und einer Zielrate von maximal 60 Frames/s
 - FPS-Anzeige oben rechts, gemessen über vollständige Frameintervalle und einmal pro Sekunde aktualisiert
 
 **Noch nicht umgesetzt:** eigentliche Spielmechaniken, Karten oder Audio. Sprite-Laden und Darstellung sind implementiert, aber noch nicht auf Hardware bestätigt. Die Hauptschleife muss noch auf der Hardware gemessen werden.
+
+### Hauptmenü und Titelbild von SD
+
+Der normale Game-Start und die Rückkehr aus dem Transfer-Modus öffnen jetzt das
+Hauptmenü. **Steuerkreuz oben/unten** oder **linker Stick oben/unten** wählen einen
+Eintrag, **Kreuz (×)** startet ihn: „Spielen“ ruft `Game::begin()` aus `Game.cpp`
+auf, „Demo“ ruft `GameTestScreen::begin()` aus `GameTestScreen.cpp` auf.
+**PS** führt aus jeder Game-Ansicht ins Hauptmenü und hat auch bei gleichzeitigem
+Kreuz-Druck Vorrang. **Options** führt weiterhin aus Spiel und Demo zurück.
+Die Rückkehr lädt das Titelbild nicht erneut. Im Transfer-Modus ist Bluetooth
+abgeschaltet; dort erfolgt die Rückkehr über KEY oder „Spiel starten“ im Browser.
+Jede Auswahl startet
+die jeweilige Ansicht neu. Eine gehaltene Richtung wechselt nur einmal; vor der
+Bedienung nach Start, Rückkehr oder Disconnect müssen Stick/Steuerkreuz, Kreuz und PS
+neutral sein. Ohne Controller bleibt das Menü sichtbar. KEY wechselt weiterhin
+zur Dateiübertragung.
+
+Auf der SD den Ordner `/system` und darin **`title.png` mit 480 × 272 Pixeln**
+bereitstellen, maximal **1 MiB**, mit den unten beschriebenen PNG-Formaten ohne
+Interlace. Das Bild wird einmal beim Game-Start mit dem vorhandenen ESP32-PNG-
+Decoder geladen. Dabei wird jedes zweite Pixel jeder zweiten Zeile übernommen;
+die gespeicherte Bitmap ist **240 × 136 Pixel, ARGB4, little-endian**. Der FT800
+vergrößert sie mit Nearest-Filter um Faktor 2 auf 480 × 272. Das ist eine bewusste
+Speicher-/Qualitätsentscheidung: feine Details gehen verloren, Farbe und Alpha
+haben jeweils vier Bit. Ein dunkles Feld verbessert die Lesbarkeit der Menüpunkte.
+Bei fehlender SD/Datei, falschen Dimensionen oder beschädigter PNG wird stattdessen
+ein einfarbiger Hintergrund mit Fehlermeldung gezeigt; beide Einträge bleiben
+bedienbar. Nach Austausch des Titelbilds den Game-Modus neu starten.
+
+Die Quelldatei `assets/system/title.png` hat 312.882 Byte und laut PNG-Header
+480 × 272 Pixel, 8-Bit-RGBA ohne Interlace. Sie überschritt das frühere 256-KiB-
+Dateilimit. Titelbild-Lader und Streaming-Decoder erlauben deshalb jetzt 1 MiB;
+das ist ein SD-Dateilimit, unabhängig von der RAM_G-Belegung. Die Datei wird
+weiterhin in kleinen Stücken gelesen, ohne größere Heap-/Grafikpuffer. Fehlende,
+leere und zu große Dateien erhalten unterschiedliche Fehlermeldungen. Für diese
+Korrektur wurden nur Quellcode und Dateimetadaten gelesen; Build, PNG-Dekodierung
+und Anzeige auf Hardware sind noch durch den Benutzer zu prüfen.
+
+Das Titelbild verwendet **Bitmap-Handle 1**, 480 Byte Stride und **65.280 Byte**
+RAM_G ab Adresse **55.296** (4-Byte-alignt). Der Spieler behält Handle 0 und die
+ersten 55.296 Byte. Beide Ressourcen können gleichzeitig resident bleiben:
+**120.576 Byte reserviert, 141.568 Byte unverplant**. Demo und Menütext benötigen
+keine zusätzlichen Bitmapdaten; es gibt keinen Fullscreen-Framebuffer.
+Beim Menü-/Demowechsel erfolgt kein SD-Transfer. Der Spieler wird bei jedem Start
+von „Spielen“ geladen. SD-Mount und SPI-Mutex werden bei wiederholtem Start
+wiederverwendet; auch die Demo zeichnet unter der gemeinsamen SPI-Sperre.
+
+`app/GameMode` koordiniert die drei Ansichten, `game/MainMenu` die Auswahl und
+Darstellung und `assets/TitleBackground` das Laden/Zeichnen des Hintergrunds.
+Beide Spielquellen werden gemeinsam eingebunden und haben getrennte Namespaces.
+Die PNG-Zeilenpuffer unterstützen jetzt bis zu 480 × 272 Pixel; der gemeinsame,
+temporäre Decoder-Heapblock ist per `static_assert` auf **52 KiB** begrenzt, auch
+beim Spieler-Laden. Es bleibt bei einem Decoder gleichzeitig, ohne vollständiges
+Bild im ESP32-Heap. Workspacegröße, Heapreserven, Ladezeit und RAM_G-Budget werden
+seriell protokolliert; tatsächliche freie RAM-Werte sind noch zu messen.
+
+**Prüfstand:** Änderungen nur statisch durchgesehen; keine Agenten-Builds oder Tests.
+Für die manuelle Abnahme selbst `pio run -e esp32dev` bauen und hochladen. Titelbild,
+Auswahl per Stick/Steuerkreuz, Kreuz-Bestätigung, beide Ansichten, Options-/PS-Rückkehr,
+wiederholte Wechsel, Disconnect/Reconnect und KEY/Transfer-Rückkehr prüfen.
+PS zusätzlich im Hauptmenü, während Bewegung, gehalten sowie gleichzeitig mit
+Kreuz prüfen: Die Rückkehr soll einmal auslösen und keine Ansicht direkt starten.
+Die PS-Erweiterung wurde nur statisch durchgesehen; keine Builds oder Tests durch
+den Agenten. Sie benötigt keine neuen Heap-Allokationen oder RAM_G-Ressourcen.
+Zusätzlich fehlende SD/Titeldatei, falsche Bildgröße und beschädigte PNG prüfen.
+Ladezeiten, Heap/größten Block, FPS sowie Firmwaregröße/App-Partitionsreserve
+mit aktivem Bluetooth erfassen. SPI-Betrieb, FT800-Skalierung und beide PNG-
+Ladewege sind noch nicht auf Hardware bestätigt.
 
 ### Spieler-Sprite von SD
 
@@ -39,12 +108,14 @@ bereits in ESP-IDF enthaltenen ESP32-ROM-Inflater (`tinfl_decompress` aus `miniz
 und rekonstruiert PNG-Zeilen auf dem ESP32. Unterstützt werden nicht-interlaced
 8-Bit-Graustufen, RGB, Graustufen mit Alpha und RGBA sowie Palettenbilder mit
 1/2/4/8 Bit und `tRNS`-Transparenz. 16-Bit- und Adam7-PNG werden mit Fehlermeldung
-abgewiesen. Dateigrösse ist auf 256 KiB und die Zahl der Chunks auf 4096 begrenzt;
+abgewiesen. Die Dateigrösse ist für den Spieler auf 256 KiB und für das Titelbild
+auf 1 MiB begrenzt; die Zahl der Chunks bleibt auf 4096 begrenzt.
 PNG-Chunk-CRC, zlib-Prüfsumme und erwartete Pixelzahl werden geprüft.
 
 Es wird kein vollständiges Bild im ESP32-Heap gehalten. Ein temporärer Heapblock
 enthält das 32-KiB-Inflate-Wörterbuch, den Decoderzustand, zwei PNG-Zeilen,
-Palette und kleine Ein-/Ausgabepuffer; `static_assert` begrenzt ihn auf **48 KiB**.
+Palette und kleine Ein-/Ausgabepuffer; `static_assert` begrenzt ihn auf **52 KiB**
+(gemeinsamer Decoder für Spieler und Titelbild).
 Seine tatsächliche Bytegrösse sowie freier Heap, grösster interner Block und
 Low-Watermark vor, während und nach dem Laden werden seriell protokolliert.
 Ein fehlgeschlagener Speicherzugriff oder eine unlesbare/falsche PNG wird angezeigt;
@@ -53,18 +124,17 @@ es gibt keinen Lade-Retry im Frame-Loop. Nach Austausch der Datei das Spiel neu 
 `PlayerSprite.cpp` konvertiert die Zeilen zu **ARGB4, little-endian** und packt sie
 frameweise in FT800 RAM_G. Zwölf Frames mit je 48 × 48 × 2 Byte belegen
 **55.296 Byte**, ab Adresse 0, mit 4-Byte-alignten Frameanfängen und Bitmap-Handle 0.
-**206.848 Byte** bleiben für spätere Ressourcen unverplant. ARGB4 reduziert Farbe
+Mit dem zusätzlichen Titelbild bleiben **141.568 Byte** für spätere Ressourcen
+unverplant. ARGB4 reduziert Farbe
 und Alpha auf jeweils vier Bit. Pro Frame werden ein Bitmap mit 96-Byte-Stride,
 48-Zeilen-Zellen und genau ein Sprite-Vertex ausgegeben, ohne Framebuffer.
 Die Textanzeige nutzt weiterhin die FT800-Schrift. SD-Lesen und Displayzugriff
 verwenden abwechselnd dieselbe vorhandene SPI-Sperre und getrennte Transaktionen;
 im laufenden Spiel erfolgen keine SD-Lesezugriffe für die Animation.
 
-Die Kopie `main/game/GameTestScreen.cpp` entspricht exakt dem vorherigen `Game.cpp`.
-Zum Bauen der Block-Demo in `main/CMakeLists.txt` den Eintrag `game/Game.cpp`
-durch `game/GameTestScreen.cpp` ersetzen. **Nur einen der beiden Screens einbinden**,
-da beide die gleiche `Game`-Schnittstelle implementieren. Die Assetquellen können
-in der Quellliste bleiben; der alte Screen ruft sie nicht auf.
+`main/game/GameTestScreen.cpp` enthält die vorherige Block-Demo im eigenen
+Namespace `GameTestScreen`, ergänzt um die gemeinsame SPI-Sperre. Beide Screens
+stehen in `main/CMakeLists.txt` und werden über das Hauptmenü gestartet.
 
 Prüfstand: Ein Zwischenstand der drei neuen/geänderten C++-Dateien wurde vor der neuen Vorgabe,
 keine Agenten-Builds/Tests auszuführen, einzeln mit dem vorhandenen ESP32-Compiler
@@ -333,7 +403,7 @@ Controller-Hardwaretests stehen weiterhin aus.
 ## Dateiübertragung über WLAN (neu, Hardwareprüfung ausstehend)
 
 Die Firmware besitzt zwei getrennte Startpfade. Im normalen **Game-Modus** bleibt
-WLAN aus und die Controller-Demo läuft wie bisher. **Transfer** startet Arduino direkt
+WLAN aus und das Hauptmenü bietet Spiel und Controller-Demo an. **Transfer** startet Arduino direkt
 über den vorhandenen `arduino_bootstrap()`, ohne `btstack_init()`, `uni_init()` oder
 GameInput/Game aufzurufen. Die Bootentscheidung fällt bereits in `main.c`.
 `CONFIG_AUTOSTART_ARDUINO` muss weiterhin deaktiviert bleiben.
@@ -351,7 +421,7 @@ GameInput/Game aufzurufen. Die Bootentscheidung fällt bereits in `main.c`.
    eines Geräts im selben WLAN öffnen. Ordner sind navigierbar; Dateien lassen sich
    hochladen und herunterladen. `Ordner erstellen` legt einen Unterordner an;
    die Einträge besitzen Buttons zum Umbenennen, Verschieben und Löschen.
-5. Mit KEY oder **Spiel starten** im Browser zur Demo zurückkehren.
+5. Mit KEY oder **Spiel starten** im Browser zum Hauptmenü zurückkehren.
 
 KEY niemals beim Reset gedrückt halten: GPIO0 bestimmt den Bootmodus des ESP32.
 Ein bereits beim Programmstart gedrückter KEY muss erst losgelassen werden; dieses

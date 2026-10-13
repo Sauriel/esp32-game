@@ -58,7 +58,9 @@ DisplayGuard::~DisplayGuard() {
     }
 }
 bool begin() {
-    mutex = xSemaphoreCreateMutexStatic(&mutexBuffer);
+    if (mounted) return true;
+    failure = nullptr;
+    if (!mutex) mutex = xSemaphoreCreateMutexStatic(&mutexBuffer);
     Display::endCommandStream(); // Noch kein Server/konkurrierender Task vorhanden.
     StorageGuard guard;
     // SPI.begin() in SD.begin() ist beim vorhandenen SPIClass idempotent.

@@ -6,7 +6,7 @@
 
 namespace PlayerPng {
 namespace {
-constexpr unsigned width = 144, height = 192;
+constexpr unsigned maxWidth = 480, maxHeight = 272;
 uint32_t be32(const uint8_t* p) {
     return uint32_t(p[0]) << 24 | uint32_t(p[1]) << 16 | uint32_t(p[2]) << 8 | p[3];
 }
@@ -23,14 +23,16 @@ int paeth(int a, int b, int c) {
     return da <= db && da <= dc ? a : (db <= dc ? b : c);
 }
 struct Decoder {
+    unsigned width = 144, height = 192;
+    size_t fileLimit = 256 * 1024;
     void* context;
     Read read;
     WriteRow write;
     tinfl_decompressor inflater{};
     uint8_t dictionary[TINFL_LZ_DICT_SIZE];
-    uint8_t previous[width * 4]{};
-    uint8_t row[width * 4 + 1];
-    uint8_t argb[width * 2];
+    uint8_t previous[maxWidth * 4]{};
+    uint8_t row[maxWidth * 4 + 1];
+    uint8_t argb[maxWidth * 2];
     uint8_t palette[256][4]{};
     uint8_t input[512];
     size_t outputOffset = 0, rowOffset = 0, rowBytes = 0;
@@ -80,7 +82,7 @@ struct Decoder {
             const uint16_t value = (a >> 4) << 12 | (r >> 4) << 8 | (g >> 4) << 4 | (b >> 4);
             argb[x * 2] = uint8_t(value); argb[x * 2 + 1] = uint8_t(value >> 8);
         }
-        if (!write(context, y++, argb, sizeof(argb))) return false;
+        if (!write(context, y++, argb, width * 2)) return false;
         memcpy(previous, pixels, rowBytes);
         rowOffset = 0;
         return true;
@@ -112,12 +114,14 @@ struct Decoder {
         const uint8_t signature[] = {137,80,78,71,13,10,26,10};
         if (!exact(header, 8) || memcmp(header, signature, 8)) return false;
         bool ihdr = false, idat = false, idatEnded = false, plte = false, trns = false;
-        // Datei-/Chunk-Limit verhindert unbegrenzte Ladephasen und grosse Allokationen.
+        // Dateilimit begrenzt die Ladephase; Chunkdaten laufen durch den festen Puffer.
         size_t total = 8;
         for (unsigned chunks = 0; chunks < 4096; ++chunks) {
             if (!exact(header, 8)) return false;
             const uint32_t length = be32(header);
-            if (length > 256 * 1024 || total + length + 12 > 256 * 1024) return false;
+            if (total > fileLimit || fileLimit - total < 12 || length > fileLimit - total - 12) {
+                error = "PNG: Dateigroesse ueber Ladelimit"; return false;
+            }
             total += length + 12;
             const bool isHeader = !memcmp(header + 4, "IHDR", 4);
             const bool isData = !memcmp(header + 4, "IDAT", 4);
@@ -142,7 +146,7 @@ struct Decoder {
                 crc = crcUpdate(crc, input, n);
                 if (isHeader) {
                     if (be32(input) != width || be32(input + 4) != height) {
-                        error = "player.png muss 144 x 192 sein"; return false;
+                        error = "PNG: falsche Bildabmessungen"; return false;
                     }
                     depth = input[8]; type = input[9];
                     channels = type == 0 ? 1 : type == 2 ? 3 : type == 3 ? 1 : type == 4 ? 2 : type == 6 ? 4 : 0;
@@ -179,14 +183,23 @@ struct Decoder {
         return false;
     }
 };
-static_assert(sizeof(Decoder) <= 48 * 1024, "PNG workspace exceeds the budget");
+static_assert(sizeof(Decoder) <= 52 * 1024, "PNG workspace exceeds the budget");
 }
 size_t workspaceBytes() { return sizeof(Decoder); }
-bool decode(void* context, Read read, WriteRow write, const char*& error) {
+bool decode(void* context, Read read, WriteRow write, const char*& error,
+            unsigned width, unsigned height, size_t fileLimit) {
     error = "PNG beschaedigt oder unvollstaendig";
+    if (!width || width > maxWidth || !height || height > maxHeight) {
+        error = "PNG: Bildabmessungen ausserhalb des Budgets"; return false;
+    }
+    if (fileLimit < 8 || fileLimit > maxFileBytes) {
+        error = "PNG: ungueltiges Dateilimit"; return false;
+    }
     // Ein begrenzter temporärer Heapblock statt grossem Task-Stack/Framebuffer.
     std::unique_ptr<Decoder> decoder(new (std::nothrow) Decoder{});
     if (!decoder) { error = "Nicht genug Heap fuer PNG-Lader"; return false; }
+    decoder->width = width; decoder->height = height;
+    decoder->fileLimit = fileLimit;
     decoder->context = context; decoder->read = read; decoder->write = write;
     tinfl_init(&decoder->inflater);
     const bool result = decoder->run(error);
