@@ -46,3 +46,6 @@ __pycache__/
 /components/btstack/
 /components/cmd_nvs/
 /components/cmd_system/
+
+# Lokale WLAN-Zugangsdaten
+/main/config/WifiCredentials.h

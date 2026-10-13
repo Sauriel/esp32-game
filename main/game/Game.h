@@ -6,5 +6,5 @@ namespace Game {
     void begin();
     // deltaTime ist die vergangene Zeit in Sekunden.
     void update(const GameInput::InputState& input, float deltaTime);
-    void render(float fps);
+    void render(float fps, const char* statusOverride = nullptr);
 }

@@ -98,7 +98,7 @@ namespace Game {
         }
     }
 
-    void render(float fps) {
+    void render(float fps, const char* statusOverride) {
         GD.ClearColorRGB(15, 25, 65);
         GD.Clear();
 
@@ -113,6 +113,7 @@ namespace Game {
         const char* status = controllerConnected
             ? (buttonMessage ? buttonMessage : "Press a button")
             : "Controller disconnected";
+        if (statusOverride) status = statusOverride;
         GD.cmd_text(240, statusHeight / 2, 26, OPT_CENTER, status);
 
         char fpsText[20] = "FPS: --";

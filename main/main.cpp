@@ -1,20 +1,35 @@
+#include <Arduino.h>
+#include "app/BootMode.h"
+#include "app/ModeSwitch.h"
 #include "display/Display.h"
 #include "game/Game.h"
 #include "input/Controller.h"
+#include "input/ModeButton.h"
 #include "timing/FrameTiming.h"
-
+#include "transfer/TransferMode.h"
 void setup() {
+    Serial.begin(115200);
+    ModeButton::begin();
     Display::begin();
-    GameInput::begin();
-    Game::begin();
+    app_log_heap("Display bereit");
+    if (boot_mode_get() == BOOT_MODE_TRANSFER) {
+        TransferMode::begin();
+    } else {
+        GameInput::begin();
+        Game::begin();
+        app_log_heap("Game bereit");
+    }
 }
-
 void loop() {
     const float deltaTime = FrameTiming::beginFrame();
-
-    GameInput::update();
-    Game::update(GameInput::getInput(), deltaTime);
-    Game::render(FrameTiming::fps());
-
+    if (ModeButton::update()) ModeSwitch::request();
+    if (boot_mode_get() == BOOT_MODE_TRANSFER) {
+        TransferMode::update();
+    } else {
+        GameInput::update();
+        Game::update(GameInput::getInput(), deltaTime);
+        Game::render(FrameTiming::fps(), ModeSwitch::status());
+    }
+    ModeSwitch::update();
     FrameTiming::endFrame();
 }

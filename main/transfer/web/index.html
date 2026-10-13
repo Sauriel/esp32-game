@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="de"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ESP32 Dateiübertragung</title>
+<style>
+body{font:16px system-ui;background:#0f1941;color:#fff;max-width:760px;margin:40px auto;padding:0 20px}
+button,input{font:inherit;padding:10px;margin:4px;border-radius:6px}button{cursor:pointer;background:#70beff;border:0}
+li{display:flex;flex-wrap:wrap;gap:8px;align-items:center;border-bottom:1px solid #526080;padding:8px}
+ul{padding:0}a{color:#70beff}progress{width:100%}#status{min-height:2em;overflow-wrap:anywhere}
+</style>
+<h1>Dateiübertragung</h1><p>MicroSD am Gameduino 2 · Zielnamen werden nicht überschrieben.</p>
+<button id="game">Spiel starten</button><button id="up">Übergeordneter Ordner</button><button id="refresh">Aktualisieren</button>
+<button id="mkdir">Ordner erstellen</button>
+<p id="path">/</p><ul id="files"></ul>
+<label>Datei wählen <input id="file" type="file"></label><button id="upload">Hochladen</button>
+<progress id="progress" value="0" max="100"></progress><p id="status" role="status"></p>
+<script>
+'use strict';
+let path='/',busy=false,switching=false;
+const el=id=>document.getElementById(id);
+const tell=text=>el('status').textContent=text;
+const child=name=>(path==='/'?'':path)+'/'+name;
+const endpoint=(route,p)=>route+'?path='+encodeURIComponent(p);
+const leaf=name=>name&&name!=='.'&&name!=='..'&&!name.includes('/')&&!name.includes('\\');
+async function mutate(action,source,target){
+ if(busy||switching)return;
+ busy=true;tell('Dateiaktion läuft …');
+ try{
+  const form=new URLSearchParams({action,path:source});if(target)form.set('target',target);
+  const response=await fetch('/api/action',{method:'POST',body:form});
+  const message=await response.text();if(!response.ok)throw Error(message);
+  await refresh();tell(message);
+ }catch(error){tell(error.message);}
+ finally{busy=false;}
+}
+async function refresh(){
+ try{
+  const response=await fetch(endpoint('/api/list',path),{cache:'no-store'});
+  if(!response.ok)throw Error(await response.text());
+  const entries=await response.json();el('files').replaceChildren();el('path').textContent=path;
+  for(const entry of entries){
+   const row=document.createElement('li'),link=document.createElement(entry.directory?'button':'a');
+   link.textContent=(entry.directory?'📁 ':'')+entry.name;
+   const target=child(entry.name);
+   if(entry.directory)link.onclick=()=>{if(!busy&&!switching){path=target;refresh();}};
+   else{link.href=endpoint('/api/file',target);link.download=entry.name;}
+   const size=document.createElement('span');size.textContent=entry.directory?'Ordner':entry.size+' Bytes';
+   row.append(link,size);el('files').append(row);
+   for(const action of ['rename','move','delete']){
+    const button=document.createElement('button');
+    button.textContent={rename:'Umbenennen',move:'Verschieben',delete:'Löschen'}[action];
+    button.onclick=()=>{
+     if(busy||switching)return;
+     if(action==='delete'){
+      if(confirm((entry.directory?'Leeren Ordner':'Datei')+' „'+entry.name+'“ dauerhaft löschen?'))mutate(action,target);
+     }else if(action==='rename'){
+      const name=prompt('Neuer Name (im selben Ordner):',entry.name);
+      if(name===null)return;if(!leaf(name)){tell('Bitte einen einzelnen Namen eingeben.');return;}
+      mutate(action,target,child(name));
+     }else{
+      let folder=prompt('Vorhandener Zielordner als vollständiger SD-Pfad, z. B. /assets:',path);
+      if(folder===null)return;
+      if(folder.length>1&&folder.endsWith('/'))folder=folder.slice(0,-1);
+      if(!folder.startsWith('/')){tell('Zielordner muss mit / beginnen.');return;}
+      mutate(action,target,(folder==='/'?'':folder)+'/'+entry.name);
+     }
+    };
+    row.append(button);
+   }
+  }
+  tell('Bereit.');
+ }catch(error){tell(error.message);}
+}
+el('refresh').onclick=()=>{if(!busy&&!switching)refresh();};
+el('up').onclick=()=>{if(!busy&&!switching){path=path.slice(0,path.lastIndexOf('/'))||'/';refresh();}};
+el('mkdir').onclick=()=>{
+ if(busy||switching)return;
+ const name=prompt('Name des neuen Ordners:');
+ if(name===null)return;if(!leaf(name)){tell('Bitte einen einzelnen Ordnernamen eingeben.');return;}
+ mutate('mkdir',child(name));
+};
+el('upload').onclick=()=>{
+ const file=el('file').files[0];if(!file||busy||switching)return;
+ busy=true;el('upload').disabled=true;el('progress').value=0;
+ const xhr=new XMLHttpRequest();xhr.open('POST',endpoint('/api/file',child(file.name)));xhr.timeout=610000;
+ xhr.upload.onprogress=event=>{if(event.lengthComputable){el('progress').value=event.loaded/event.total*100;tell('Vom Browser gesendet: '+Math.floor(event.loaded/event.total*100)+' % · Speicherung noch nicht bestätigt');}};
+ xhr.upload.onload=()=>tell('Vom Browser vollständig gesendet · warte auf Speicherbestätigung des ESP32');
+ const done=()=>{busy=false;el('upload').disabled=switching;};
+ xhr.onload=()=>{done();if(xhr.status===201){el('progress').value=100;refresh();}else tell(xhr.responseText||'Upload fehlgeschlagen.');};
+ xhr.onerror=()=>{done();tell('Verbindung unterbrochen; Upload nicht bestätigt.');};
+ xhr.ontimeout=()=>{done();tell('Upload-Zeitlimit überschritten.');};
+ xhr.send(file);
+};
+el('game').onclick=async()=>{
+ switching=true;el('upload').disabled=true;el('game').disabled=true;
+ tell('Wechsel angefordert; eine laufende Dateiübertragung endet zuerst.');
+ try{const response=await fetch('/api/game',{method:'POST'});if(!response.ok)throw Error(await response.text());tell(await response.text());}
+ catch(error){tell('Antwort nicht erhalten: '+error.message+'. KEY am Gerät verwenden.');}
+};
+refresh();
+</script></html>

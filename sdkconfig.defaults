@@ -74,3 +74,19 @@ CONFIG_ARDUINO_SELECTIVE_ESP_SR=n
 # See: https://github.com/bluekitchen/btstack/issues/599
 #
 CONFIG_BTSTACK_AUDIO=n
+
+# Transfer-Modus: vorhandene Arduino-Bibliotheken und lange FAT-Dateinamen.
+CONFIG_ARDUINO_SELECTIVE_Network=y
+CONFIG_ARDUINO_SELECTIVE_WiFi=y
+CONFIG_ARDUINO_SELECTIVE_FS=y
+CONFIG_ARDUINO_SELECTIVE_SD=y
+CONFIG_ARDUINO_SELECTIVE_SPI=y
+CONFIG_FATFS_LFN_STACK=y
+CONFIG_FATFS_MAX_LFN=127
+CONFIG_HTTPD_MAX_URI_LEN=768
+CONFIG_FATFS_API_ENCODING_UTF_8=y
+
+# Beide Modi sind in einem Image gebunden: Wi-Fi-Code aus Flash ausfuehren,
+# damit neben Bluetooth genug IRAM bleibt. Durchsatz auf Hardware messen.
+CONFIG_ESP_WIFI_IRAM_OPT=n
+CONFIG_ESP_WIFI_RX_IRAM_OPT=n
