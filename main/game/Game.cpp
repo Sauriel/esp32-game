@@ -7,9 +7,11 @@
 namespace Game {
 
     namespace {
+        // Pixel pro Sekunde: zuvor 8 Pixel pro Update bei etwa 10 Updates/s.
+        constexpr float moveSpeedPixelsPerSecond = 80.0f;
+
         constexpr int blockHalfSize = 10;
         constexpr int statusHeight = 32;
-        constexpr float movementPerUpdate = 8.0f;
         constexpr uint32_t buttonMessageDurationMs = 1000;
 
         struct Block {
@@ -48,10 +50,10 @@ namespace Game {
             {&GameInput::InputState::ps, "PS Pressed"},
         };
 
-        void moveBlock(Block& block, float x, float y) {
-            block.x = constrain(block.x + x * movementPerUpdate,
+        void moveBlock(Block& block, float deltaX, float deltaY) {
+            block.x = constrain(block.x + deltaX,
                                 float(blockHalfSize), float(480 - blockHalfSize));
-            block.y = constrain(block.y + y * movementPerUpdate,
+            block.y = constrain(block.y + deltaY,
                                 float(statusHeight + blockHalfSize), float(272 - blockHalfSize));
         }
 
@@ -71,15 +73,16 @@ namespace Game {
         buttonPressedAt = 0;
     }
 
-    void update(const GameInput::InputState& input) {
+    void update(const GameInput::InputState& input, float deltaTime) {
         controllerConnected = input.connected;
         if (!controllerConnected) {
             buttonMessage = nullptr;
             return;
         }
 
-        moveBlock(leftBlock, input.moveX, input.moveY);
-        moveBlock(rightBlock, input.lookX, input.lookY);
+        const float movement = moveSpeedPixelsPerSecond * deltaTime;
+        moveBlock(leftBlock, input.moveX * movement, input.moveY * movement);
+        moveBlock(rightBlock, input.lookX * movement, input.lookY * movement);
 
         const uint32_t now = millis();
         if (buttonMessage && now - buttonPressedAt >= buttonMessageDurationMs) {
@@ -112,6 +115,9 @@ namespace Game {
         GD.cmd_text(240, statusHeight / 2, 26, OPT_CENTER, status);
 
         GD.swap();
+        // swap() reiht nur Kommandos ein. Vor dem naechsten Frame abarbeiten,
+        // damit alte Bilder keine sichtbare Eingabeverzoegerung aufbauen.
+        GD.finish();
     }
 
 }

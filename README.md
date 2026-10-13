@@ -11,8 +11,9 @@ Entwickelt wird mit **C++**, **PlatformIO**, **ESP-IDF**, **Arduino als ESP-IDF-
 - Zwei Blöcke mit linkem und rechtem Analogstick bewegen und innerhalb des Spielbereichs halten
 - Tastendrücke oben mittig für eine Sekunde anzeigen (z. B. `X (Cross) Pressed`)
 - Spiellogik, Eingabeverarbeitung und Displayinitialisierung in getrennten Modulen
+- Zeitbasierte Bewegung mit Delta-Time und einer Zielrate von maximal 60 Frames/s
 
-**Noch nicht umgesetzt:** eigentliche Spielmechaniken, Sprites, Karten, Audio oder ein zeitbasiertes Update mit Delta-Time.
+**Noch nicht umgesetzt:** eigentliche Spielmechaniken, Sprites, Karten oder Audio. Die neue Hauptschleife muss noch auf der Hardware gemessen werden.
 
 ## Hardware
 
@@ -103,8 +104,10 @@ pio run -e esp32dev
 
 Prüfstand der Korrektur: CMake-Konfiguration erfolgreich; die vier Assemblydateien
 für Insights/RainMaker wurden erzeugt und direkt mit der ESP32-Toolchain kompiliert.
-Ein vollständiger PlatformIO-Build ist hier weiterhin durch den separaten
-SCons-Installationsfehler `No module named 'SCons.Tool.FortranCommon'` blockiert.
+Ein früherer Build-Versuch des Agenten scheiterte am separaten
+SCons-Installationsfehler `No module named 'SCons.Tool.FortranCommon'`.
+Laut Benutzer funktioniert der Build über den VSCode-Build-Button ohne Probleme.
+Weitere Builds führt der Benutzer in VSCode aus.
 
 ## Projektstruktur
 
@@ -148,10 +151,48 @@ Bewegung beider Sticks und alle Tasten müssen noch auf der Hardware geprüft we
 Ein temporärer Host-Test mit Display-Testdouble prüfte unabhängige Bewegung,
 Randbegrenzung, Anzeigedauer (auch beim Uhrüberlauf) und Disconnect erfolgreich.
 `Game.cpp` wurde direkt mit der ESP32-Toolchain und dem zusätzlichen Include-Pfad
-zur projektlokalen Gameduino-Bibliothek kompiliert. Der vollständige PlatformIO-Build
-scheitert weiterhin am unten beschriebenen SCons-Fehler.
+zur projektlokalen Gameduino-Bibliothek kompiliert. Der damalige vollständige
+Build-Versuch des Agenten scheiterte am oben beschriebenen SCons-Fehler;
+der Benutzer bestätigt inzwischen einen funktionierenden VSCode-Build.
 
-Die Darstellung verwendet aktuell eine einfache Testgrafik und ein festes `delay(100)` in der Hauptschleife.
+Die Darstellung verwendet aktuell eine einfache Testgrafik. Die Hauptschleife misst
+mit `micros()` die Zeit zwischen Frame-Anfängen, einschließlich Render- und Wartezeit.
+`Game::update()` erhält Sekunden; beide Blöcke bewegen sich bei voller Auslenkung
+mit 80 Pixeln/s pro Achse. Die alte zusätzliche Multiplikation mit 8 Pixeln pro
+Update wurde entfernt. Das entspricht ungefähr dem Tempo der früheren Schleife
+mit `delay(100)`; der Parameter `moveSpeedPixelsPerSecond` in `Game.cpp` legt das
+gewünschte Tempo unabhängig von der Framerate fest.
+
+Die Schleife wartet nur die verbleibende Framezeit, auf ganze Millisekunden
+aufgerundet, und gibt bei überschrittener Framezeit mit `delay(1)` anderen Tasks
+Rechenzeit. 60 FPS sind ein Zielwert, keine gemessene Bildrate. Delta-Time wird
+bei 50 ms begrenzt, um große Positionssprünge nach Hängern zu vermeiden. Bei
+dauerhaft längeren Frames geht dadurch Bewegungszeit verloren; die Begrenzung
+ist kein Ersatz für das Beheben langsamer Frames. Ein Fixed-Timestep ist noch
+nicht umgesetzt.
+
+Ohne `NDEBUG` erscheint alle fünf Sekunden eine Diagnose mit Schleifenrate,
+längstem Frameintervall, Zahl der auf 50 ms begrenzten Zeitschritte sowie freiem,
+minimalem und größtem zusammenhängendem Heap. `GD.swap()` übergibt Kommandos,
+ohne auf deren Abarbeitung zu warten. Deshalb folgt in `Game::render()` jetzt
+`GD.finish()`: Die Command-FIFO wird vor dem nächsten Frame abgearbeitet, damit
+keine Warteschlange alter Bilder eine sichtbare Eingabeverzögerung aufbaut.
+Diese Wartezeit wird vom Framebudget abgezogen und ist im nächsten Delta-Time
+enthalten. Die tatsächlich erreichbare Bildrate bleibt auf der Hardware zu messen.
+Es entstehen keine neuen Bitmap-Assets, RAM_G-Belegungen oder Heap-Allokationen
+im Spielcode; die Diagnose verwendet nur wenige feste Zähler.
+
+Prüfstand der Delta-Time-Korrektur: Ein temporärer Host-Test prüft gleiche
+Bewegungsstrecken bei 30/60 Updates/s und wechselnden Zeitschritten sowie
+unabhängige Sticks, Randbegrenzung und Disconnect. `main.cpp` und `Game.cpp`
+wurden vor der Ergänzung von `GD.finish()` direkt mit der vorhandenen ESP32-Toolchain
+erfolgreich kompiliert. Der Benutzer bestätigt einen funktionierenden VSCode-Build.
+Die anschließende FIFO-Synchronisierung wurde anhand des lokalen Treibers geprüft;
+ein erneuter Build durch den Agenten wurde auf Benutzerwunsch nicht ausgeführt.
+Auf der Hardware sind insbesondere die gemeldete Eingabeverzögerung von 1–2 Sekunden,
+Bewegung bei kleinen Stickauslenkungen, Framezeiten mit/ohne
+Controller, alle Tasten sowie Disconnect/Reconnect zu prüfen. Messausgaben
+mit `dt limited` größer als 0 weisen auf Frames über 50 ms hin.
 
 ### Controller-Snapshot
 
@@ -191,19 +232,20 @@ Mausgerät. PS kann zusätzlich vom Bluetooth-Backend behandelt werden.
 
 Die Erweiterung verwendet feste Strukturen ohne neue Heap-Allokationen oder
 Grafikspeicher. Hardwaretests für alle Tasten, Stick-Deadzone, Trigger-Endlagen sowie
-Disconnect/Reconnect stehen noch aus. Die Abfragefrequenz bleibt vorerst durch
-das bestehende `delay(100)` begrenzt; sehr kurze Tastendrücke können verpasst werden.
+Disconnect/Reconnect stehen noch aus. Eingaben werden einmal pro Frame abgefragt;
+sehr kurze Tastendrücke zwischen zwei Abfragen können weiterhin verpasst werden.
 
 Prüfstand dieser Erweiterung: Ein temporärer Host-Test mit Bluepad32-Testdouble
 prüfte Tastenmapping, Flanken, Snapshot, Wertebegrenzung und Controllerwechsel
 erfolgreich. `Controller.cpp` ließ sich mit der ESP32-Toolchain und den tatsächlichen
 Projekt-Headern kompilieren. Der vollständige `pio run -e esp32dev` scheiterte im
-Build-Werkzeug an `No module named 'SCons.Tool.FortranCommon'`; ein erfolgreicher
-Firmware-Build und der Hardwaretest stehen daher noch aus.
+Build-Werkzeug an `No module named 'SCons.Tool.FortranCommon'`. Der Benutzer
+bestätigt inzwischen einen funktionierenden VSCode-Build; die vollständigen
+Controller-Hardwaretests stehen weiterhin aus.
 
 ## Geplante nächste Schritte
 
-- Hauptschleife mit geregelter Framerate und Delta-Time
+- Tatsächliche Framerate und Eingabereaktion der Delta-Time-Schleife auf der Hardware messen
 - Spielfigur und Sprite-Darstellung
 - Tilemap, Kollisionen und grundlegende 2D-Spielmechaniken
 - Weitere Controller-Aktionen

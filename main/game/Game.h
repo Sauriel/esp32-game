@@ -4,6 +4,7 @@
 
 namespace Game {
     void begin();
-    void update(const GameInput::InputState& input);
+    // deltaTime ist die vergangene Zeit in Sekunden.
+    void update(const GameInput::InputState& input, float deltaTime);
     void render();
 }
