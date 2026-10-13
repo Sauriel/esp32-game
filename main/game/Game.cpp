@@ -3,6 +3,7 @@
 #include <Arduino.h>
 #include <SPI.h>
 #include <GD2.h>
+#include <cstdio>
 
 namespace Game {
 
@@ -97,7 +98,7 @@ namespace Game {
         }
     }
 
-    void render() {
+    void render(float fps) {
         GD.ClearColorRGB(15, 25, 65);
         GD.Clear();
 
@@ -113,6 +114,12 @@ namespace Game {
             ? (buttonMessage ? buttonMessage : "Press a button")
             : "Controller disconnected";
         GD.cmd_text(240, statusHeight / 2, 26, OPT_CENTER, status);
+
+        char fpsText[20] = "FPS: --";
+        if (fps >= 0.0f) {
+            snprintf(fpsText, sizeof(fpsText), "FPS: %.1f", fps);
+        }
+        GD.cmd_text(472, statusHeight / 2, 26, OPT_RIGHTX | OPT_CENTERY, fpsText);
 
         GD.swap();
         // swap() reiht nur Kommandos ein. Vor dem naechsten Frame abarbeiten,

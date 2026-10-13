@@ -12,6 +12,7 @@ Entwickelt wird mit **C++**, **PlatformIO**, **ESP-IDF**, **Arduino als ESP-IDF-
 - Tastendrücke oben mittig für eine Sekunde anzeigen (z. B. `X (Cross) Pressed`)
 - Spiellogik, Eingabeverarbeitung und Displayinitialisierung in getrennten Modulen
 - Zeitbasierte Bewegung mit Delta-Time und einer Zielrate von maximal 60 Frames/s
+- FPS-Anzeige oben rechts, gemessen über vollständige Frameintervalle und einmal pro Sekunde aktualisiert
 
 **Noch nicht umgesetzt:** eigentliche Spielmechaniken, Sprites, Karten oder Audio. Die neue Hauptschleife muss noch auf der Hardware gemessen werden.
 
@@ -120,6 +121,7 @@ Weitere Builds führt der Benutzer in VSCode aus.
 │   ├── display/            # Initialisierung von SPI und Gameduino
 │   ├── game/               # Spielzustand, Bewegung und Darstellung
 │   ├── input/              # Bluetooth-Controller und Eingabestatus
+│   ├── timing/             # Delta-Time, FPS-Messung und Framebegrenzung
 │   ├── main.c              # Bluepad32-/ESP-IDF-Einstiegspunkt
 │   └── main.cpp            # setup() und loop()
 ├── patches/                # Ergänzende Patches aus der Entwicklung
@@ -171,16 +173,35 @@ dauerhaft längeren Frames geht dadurch Bewegungszeit verloren; die Begrenzung
 ist kein Ersatz für das Beheben langsamer Frames. Ein Fixed-Timestep ist noch
 nicht umgesetzt.
 
-Ohne `NDEBUG` erscheint alle fünf Sekunden eine Diagnose mit Schleifenrate,
-längstem Frameintervall, Zahl der auf 50 ms begrenzten Zeitschritte sowie freiem,
-minimalem und größtem zusammenhängendem Heap. `GD.swap()` übergibt Kommandos,
-ohne auf deren Abarbeitung zu warten. Deshalb folgt in `Game::render()` jetzt
-`GD.finish()`: Die Command-FIFO wird vor dem nächsten Frame abgearbeitet, damit
-keine Warteschlange alter Bilder eine sichtbare Eingabeverzögerung aufbaut.
-Diese Wartezeit wird vom Framebudget abgezogen und ist im nächsten Delta-Time
-enthalten. Die tatsächlich erreichbare Bildrate bleibt auf der Hardware zu messen.
-Es entstehen keine neuen Bitmap-Assets, RAM_G-Belegungen oder Heap-Allokationen
-im Spielcode; die Diagnose verwendet nur wenige feste Zähler.
+Delta-Time, Framebegrenzung und FPS-Messung liegen in `main/timing/FrameTiming.cpp`.
+`main.cpp` koordiniert nur Eingabe, Spielupdate, Rendering und Timing. Die bisherige
+periodische serielle Schleifen-/Heap-Diagnose wurde entfernt.
+
+Oben rechts zeigt `FPS: 59.8` beispielsweise die gemessene Spiel-Framerate mit einer
+Nachkommastelle. Vor dem ersten vollständigen Messfenster steht dort `FPS: --`.
+Die Berechnung teilt die Anzahl vollständiger Frameintervalle durch deren tatsächlich
+vergangene Zeit (mindestens eine Sekunde pro Messfenster), einschließlich Eingabe,
+Rendering, FIFO-Wartezeit und Framebegrenzung. Das 50-ms-Limit gilt nur für die
+Bewegung und verfälscht die FPS-Messung nicht. Die Anzeige misst die Rate neu
+bereitgestellter Spielbilder, nicht die elektrische Bildwiederholrate des Displays.
+
+`GD.swap()` übergibt Kommandos, ohne auf deren Abarbeitung zu warten. Deshalb folgt
+in `Game::render()` weiterhin `GD.finish()`, damit keine Warteschlange alter Bilder
+eine sichtbare Eingabeverzögerung aufbaut. Diese Wartezeit ist im nächsten
+Frameintervall enthalten. Die Anzeige nutzt die eingebaute FT800-Schrift und
+benötigt keine zusätzlichen RAM_G-Assets oder Heap-Allokationen. Das Timing hält
+wenige feste Zähler; der Textpuffer belegt 20 Byte Stack
+und ergänzt einen Textbefehl pro Frame in der weiterhin kleinen Testszene.
+Layout, FPS mit/ohne Controller, Verhalten bei langsamen Frames und
+Disconnect/Reconnect sind noch auf echter Hardware zu prüfen.
+
+Prüfstand der FPS-Erweiterung: Ein temporärer Host-Test prüfte die Messung bei
+50 und 10 FPS, das unabhängige 50-ms-Delta-Time-Limit, den `micros()`-Überlauf und
+die Wartezeit erfolgreich. `main.cpp`, `Game.cpp` und `FrameTiming.cpp` wurden
+mit dem installierten ESP32-Compiler und den Projekt-Headern erfolgreich kompiliert.
+Der vollständige `pio run -e esp32dev` scheiterte weiterhin im Build-Werkzeug an
+`No module named 'SCons.Tool.FortranCommon'`; ein vollständiger Firmware-Build
+und die Hardwareprüfung der Anzeige stehen aus.
 
 Prüfstand der Delta-Time-Korrektur: Ein temporärer Host-Test prüft gleiche
 Bewegungsstrecken bei 30/60 Updates/s und wechselnden Zeitschritten sowie
@@ -190,9 +211,8 @@ erfolgreich kompiliert. Der Benutzer bestätigt einen funktionierenden VSCode-Bu
 Die anschließende FIFO-Synchronisierung wurde anhand des lokalen Treibers geprüft;
 ein erneuter Build durch den Agenten wurde auf Benutzerwunsch nicht ausgeführt.
 Auf der Hardware sind insbesondere die gemeldete Eingabeverzögerung von 1–2 Sekunden,
-Bewegung bei kleinen Stickauslenkungen, Framezeiten mit/ohne
-Controller, alle Tasten sowie Disconnect/Reconnect zu prüfen. Messausgaben
-mit `dt limited` größer als 0 weisen auf Frames über 50 ms hin.
+Bewegung bei kleinen Stickauslenkungen, FPS mit/ohne Controller, alle Tasten
+sowie Disconnect/Reconnect zu prüfen.
 
 ### Controller-Snapshot
 

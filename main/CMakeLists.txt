@@ -4,6 +4,7 @@ set(srcs
     "input/Controller.cpp"
     "display/Display.cpp"
     "game/Game.cpp"
+    "timing/FrameTiming.cpp"
 )
 
 set(requires
