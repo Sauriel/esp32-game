@@ -9,7 +9,7 @@ Entwickelt wird mit **C++**, **PlatformIO**, **ESP-IDF**, **Arduino als ESP-IDF-
 - Gameduino-2-Display über SPI ansteuern (480 × 272 Pixel)
 - DualShock-4-Controller über Bluepad32 verbinden und Eingaben auslesen
 - Spieler vom linken Stick bewegen; Sprite aus `/player.png` mit vier Blickrichtungen und Gehframes (Hardwareprüfung ausstehend)
-- Fester texturierter Raum mit MZ-Autotiles aus `/tiles`, oberer Wand und Fussbox-Kollision (Hardwareprüfung ausstehend)
+- Zufallsdungeon (64 × 48 Tiles) mit MZ-Autotiles aus `/tiles`, Fussbox-Kollision und am Spieler zentrierter Kamera (Hardwareprüfung ausstehend)
 - Hauptmenü mit SD-Hintergrund `/system/title.png` und Auswahl „Spielen“ / „Demo“
 - Zwei-Block-Demo in `main/game/GameTestScreen.cpp`, über das Menü erreichbar
 - Tastendrücke oben mittig für eine Sekunde anzeigen (z. B. `X (Cross) Pressed`)
@@ -17,7 +17,7 @@ Entwickelt wird mit **C++**, **PlatformIO**, **ESP-IDF**, **Arduino als ESP-IDF-
 - Zeitbasierte Bewegung mit Delta-Time und einer Zielrate von maximal 60 Frames/s
 - FPS-Anzeige oben rechts, gemessen über vollständige Frameintervalle und einmal pro Sekunde aktualisiert
 
-**Noch nicht umgesetzt:** zufällige Dungeons, Kampf, Interaktionen oder Audio. Sprite-/Tile-Laden, Raumdarstellung und Kollision sind implementiert, aber noch nicht auf Hardware bestätigt. Die Hauptschleife muss noch auf der Hardware gemessen werden.
+**Noch nicht umgesetzt:** Story-/Random-Menüauswahl, Kampf, Interaktionen oder Audio. Zufallsdungeon, Kamera, Sprite-/Tile-Laden und Kollision sind implementiert, aber noch nicht auf Hardware bestätigt. Ein versioniertes Leveldateiformat mit SD-Lade-/Export-API ist vorbereitet. Die Hauptschleife muss noch auf der Hardware gemessen werden.
 
 ### Hauptmenü und Titelbild von SD
 
@@ -155,7 +155,7 @@ mit aktivem Bluetooth und FPS aus den Logs/Display erfassen. Zusätzlich fehlend
 SD/PNG, falsche Dimensionen und beschädigte PNG sowie Wechsel zu Transfer und
 zurück prüfen. Der vollständige Firmware-/Flash-/RAM-Bericht steht aus.
 
-### Texturierter Raum und Kollision
+### Zufallsdungeon, Kamera und Kollision
 
 „Spielen“ lädt zusätzlich die unveränderten Quelldateien aus dem SD-Ordner `/tiles`:
 
@@ -191,28 +191,57 @@ Diese erste Umsetzung unterstützt statische Boden-/Decken-/Wand-Autotiles;
 Wasseranimationen und Counter-/Table-Sonderregeln sind nicht enthalten.
 Layoutreferenz: [MZ Asset Standards](https://rpgmakerofficial.com/product/MZ_help-en/01_11_01.html).
 
-Der Raum nutzt bewusst **48 Pixel Darstellung pro Tile** ohne Skalierung oder
-Kamera: oben Decke von y=0 bis 48, darunter eine 96 Pixel hohe Wand bis y=144;
-links/rechts je 48 Pixel Decke und unten 48 Pixel Decke ab y=224. Damit bleibt
-ein **384 × 80 Pixel** grosser Bodenbereich (x=48…432, y=144…224).
-Die Statusleiste überlagert die oberen 32 Pixel. Der Raum hat zehn Spalten und
-sechs Materialreihen; die vorletzte Reihe ist wegen der 272-Pixel-Displayhöhe
-nur 32 Pixel hoch. Dort werden beide 24-Pixel-Teilbildhälften innen um je acht
-Pixel gekürzt, damit die oberen/unteren Autotile-Ränder erhalten bleiben.
-Das ist eine Anpassung dieses festen Screens, kein allgemeines Dungeon-Dateiformat.
-Für grössere Dungeons sind Rendermaßstab und Kamera weiterhin zu entscheiden.
+„Spielen“ erzeugt bei jedem Start einen neuen **64 × 48 Tile** grossen Dungeon,
+also **3072 × 2304 Weltpixel** bei unverändert **48 Pixeln pro Tile**.
+`world/DungeonGenerator` platziert neun Räume in einem 3 × 3-Sektorraster.
+Raumgrössen und Positionen variieren; eine durchgehende Schlangenfolge verbindet
+alle Räume mit drei Tiles breiten L-Gängen. Weitere zufällige Nachbarverbindungen
+können Schleifen erzeugen. Schmale vertikale Lücken zwischen Bodenbereichen werden
+verbunden, damit oberhalb des Bodens zwei Wandreihen (96 Pixel) und mindestens
+eine Deckenreihe Platz haben. Dabei wird nur zusätzlicher Boden geöffnet;
+die anschliessende Wandableitung ersetzt ausschliesslich solide Decke.
+Alle erzeugten Bodenflächen sind dadurch mit dem Startraum verbunden.
+Der äussere Kartenrand bleibt geschlossen. Türen, Gegner und Ziele gibt es noch nicht.
 
-`world/Room` hält 60 ein Byte grosse Material-IDs getrennt von den Texturen.
+Der Seed wird beim Start einmal mit dem vorhandenen ESP-IDF-`esp_random()` bestimmt
+und seriell ausgegeben. Der Generator selbst verwendet einen lokalen Xorshift32-
+Zustand ohne Heapallokationen. `Game::begin(seed)` erzeugt mit demselben Seed in
+Generatorversion 1 dieselbe Karte; Seed 0 wird auf `0x6d2b79f5` abgebildet.
+Änderungen an zukünftigen Generatorversionen können andere Karten ergeben;
+eine exportierte Leveldatei hält deshalb das tatsächliche Raster fest.
+
+`world/Camera` folgt dem Sprite-Mittelpunkt; die Figur bleibt bei **(240, 136)**
+auf dem gesamten 480 × 272-Display. Die oberen 32 Pixel bleiben Statusoverlay.
+Die Kamera wird nicht an Kartengrenzen angehalten: auch dort bleibt die Figur
+mittig, und ausserhalb der Karte erscheint solide Decke. Weltpositionen bleiben
+von Bildschirmpositionen getrennt; der Renderer rundet die Kameraposition auf
+ganze Pixel und zeichnet maximal **11 × 7 sichtbare Tiles**, einschließlich
+angeschnittener Randtiles. Die Autotile-Nachbarn werden aus der gesamten Karte
+ermittelt. Negative Bildschirmpositionen nutzen FT800-`Vertex2f` in 1/16-Pixel-
+Einheiten; der Bildschirm schneidet Randtiles ab. Alle Tiles bleiben vollständig
+48 × 48 Pixel gross; die frühere gekürzte Bildschirmreihe entfällt.
+
+`world/Room` hält bis zu 3072 ein Byte grosse Material-IDs getrennt von den Texturen.
 Boden ist begehbar, Wand und Decke sind solide. Die **16 × 12 Pixel** grosse
 Fussbox liegt horizontal mittig im Spieler-Sprite, vertikal 12…24 Pixel unter
 seinem Mittelpunkt. Ihre Abmessungen sind ein vorläufiger Gameplayparameter;
 transparente Bildränder spielen bei der Kollision keine Rolle. Der Spieler startet
-mit seiner Fussbox in der Bodenmitte. Die Bewegung prüft zuerst X, dann Y gegen
+mit seiner Fussbox im angegebenen Starttile. Die Bewegung prüft zuerst X, dann Y gegen
 die soliden Raumrechtecke und begrenzt auch grosse Bewegungsschritte an der ersten
 Kante. An einer Wand ist damit seitliches Gleiten möglich. Gehframes laufen nur,
 wenn sich die Figur tatsächlich bewegt. Der Renderer zeichnet Boden/Wand,
-anschliessend den Spieler und zuletzt die Decke als Vordergrund.
-Eine zufällige Dungeon-Erzeugung ist noch nicht implementiert.
+anschliessend den Spieler und zuletzt die Decke als Vordergrund. Die Kollision
+prüft nur die vom jeweiligen Bewegungsschritt berührten Zellen.
+
+Zufallskarten und feste Level teilen `Room::Map`. Das lesbare, versionierte
+**DNG1-Dateiformat** speichert Grösse, Starttile, Seed und das vollständige Materialraster.
+`Game::beginFromLevel("/levels/example.dng")` startet ein SD-Level;
+`DungeonFile::save("/levels/name.dng")` exportiert die aktuelle Karte, ohne vorhandene
+Dateien zu überschreiben. Beide APIs sind für spätere Menü-/Ladephasen vorgesehen;
+der jetzige Menüeintrag „Spielen“ verwendet weiterhin ausschliesslich den Generator.
+Es wird weder automatisch ein Level geladen noch automatisch auf SD gespeichert.
+Format, Grenzen, APIs und Beispiel stehen in
+[docs/dungeon-format.md](docs/dungeon-format.md) und [assets/levels/example.dng](assets/levels/example.dng).
 
 Bei fehlender, beschädigter oder falsch dimensionierter Tiledatei bleibt die
 betroffene Materialgruppe einfarbig, mit unveränderter Kollision. Der Screen nennt
@@ -221,21 +250,38 @@ fehlerhaften Dateien. Die Loader protokollieren Ladezeiten und Heapdiagnosen.
 Spieler, Titel und alle drei Sheets belegen zusammen **194.304 von 262.144 Byte
 RAM_G**, **67.840 Byte unverplant**. Es gibt keine zusätzliche Grafik-Reserve
 ausserhalb dieses Restes und keinen Fullscreen-Framebuffer. Pro Bild werden
-höchstens 60 Tiles beziehungsweise 240 Teilbilder gezeichnet. Die Raumkommandos
-benötigen rechnerisch weniger als 2,5 KiB Displayliste; Sprite und ROM-Texte kommen
+höchstens 77 Tiles beziehungsweise 308 Teilbilder gezeichnet. Die Tilekommandos
+benötigen rechnerisch weniger als 3 KiB Displayliste; Sprite und ROM-Texte kommen
 hinzu. Die vorhandene FIFO-Verwaltung und `GD.finish()` bleiben erhalten;
 tatsächliche Gesamt-Displaylistengrösse und Framerate sind auf Hardware zu messen.
+Zusätzlich gibt es zwei statische Kartenpuffer: aktive Karte und SD-Ladekandidat,
+jeweils per `static_assert` auf höchstens 3100 Byte begrenzt, zusammen maximal
+6200 Byte auch ohne Level-Laden. Das Raster allein braucht je 3072 Byte;
+Metadaten und ggf. Alignment kommen hinzu. Der Generator hält neun kleine
+Raumbeschreibungen auf dem Stack, der Dateilader einen 128-Byte-Lesepuffer und
+eine 96-Byte-Zeile. Es gibt keine dynamische Kartenallokation und keine neuen Tasks.
+Tatsächliche `sizeof(Room::Map)`-Werte und Heapdiagnosen stehen im Startlog;
+statischer RAM, grösster freier Block und Flashreserve bleiben durch den Benutzer
+zu messen. Die neue Speicherobergrenze ist eine vorläufige Softwareentscheidung.
 
 **Prüfstand:** nur statische Quellcodedurchsicht; kein Build und keine Tests durch
 den Agenten. Zur manuellen Abnahme selbst `pio run -e esp32dev` bauen und hochladen.
-Im Menü „Spielen“ wählen und insbesondere Decken-Aussen-/Innenecken, nahtlosen Boden,
-obere/untere Wandkante und die gekürzte Bodenreihe prüfen. Alle vier Raumgrenzen
-und diagonales Gleiten mit dem Stick prüfen: die Fussbox bleibt auf dem Boden,
+Ein Benutzer-Build meldete einen fehlenden `uint32_t`-Typ in `Game.h`; der Header
+bindet jetzt `<stdint.h>` selbst ein. Damit wird auch die Deklaration von
+`Game::begin(seed)` sichtbar, deren Ausfall den Folgefehler „too many arguments“
+verursachte. Ein erneuter Benutzer-Build zur Bestätigung steht aus.
+Im Menü „Spielen“ mehrfach starten und unterschiedliche Seeds/Layouts prüfen.
+Räume und Gänge erkunden: Kamera hält die Figur mittig, Randtiles scrollen ohne
+Umspringen, Wände sind 96 Pixel hoch, alle Räume erreichbar. Decken-Aussen-/Innenecken,
+nahtlosen Boden, Wandkanten und Aussenbereiche an Kartengrenzen prüfen.
+Wand-/Deckenkollisionen und diagonales Gleiten prüfen: die Fussbox bleibt auf dem Boden,
 die Spriteoberkante darf vor der Wand liegen. Ausrichtung/Animation bei blockierter
 Bewegung, Disconnect/Reconnect, mehrfache Menü-/Demo-/Spielwechsel sowie KEY-/Transfer-
 Rückkehr prüfen. Fehlende/falsche/beschädigte Tiledatei muss eine Ersatzfläche und
 Fehlermeldung erzeugen. Heap/grössten Block/Minimum mit Bluetooth, Ladezeiten, FPS,
 RAM_G-/Displaylistenbelegung und den Firmware-Flash-/RAM-Bericht dokumentieren.
+Level-Laden/Export sind im Menü noch nicht auswählbar; die manuellen Schritte für
+die APIs, ungültige Dateien und Erhalt der bisherigen Karte stehen in der Formatdokumentation.
 
 ## Hardware
 
@@ -790,7 +836,7 @@ Noch durchzuführen:
 
 - Tatsächliche Framerate und Eingabereaktion der Delta-Time-Schleife auf der Hardware messen
 - Spielfigur und Sprite-Darstellung
-- Raumdaten/Kamera für grössere und später zufällige Dungeons erweitern
+- Story-/Random-Auswahl und Leveldatei-Auswahl im Menü ergänzen
 - Grundlegende 2D-Spielmechaniken ergänzen
 - Weitere Controller-Aktionen
 

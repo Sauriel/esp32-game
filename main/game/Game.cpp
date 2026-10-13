@@ -9,6 +9,10 @@
 #include "assets/RoomTiles.h"
 #include "world/Room.h"
 #include "storage/SdStorage.h"
+#include "storage/DungeonFile.h"
+#include "app/BootMode.h"
+#include <esp_random.h>
+#include <esp_log.h>
 
 namespace Game {
 
@@ -72,21 +76,41 @@ namespace Game {
             player.y = body.y - bodyOffsetY;
         }
 
+        void startScene() {
+            const auto& map = Room::map();
+            player = {(map.spawnColumn + 0.5f) * Room::tileSize,
+                      (map.spawnRow + 0.5f) * Room::tileSize - bodyOffsetY - bodyHeight / 2};
+            direction = 0;
+            walkStep = 0;
+            walkElapsed = 0;
+            walking = false;
+            controllerConnected = false;
+            buttonMessage = nullptr;
+            buttonPressedAt = 0;
+            if (!PlayerSprite::load()) Serial.println(PlayerSprite::error());
+            if (!RoomTiles::load()) Serial.println(RoomTiles::error());
+            app_log_heap("Dungeon bereit");
+        }
     }
 
-    void begin() {
-        Room::begin();
-        player = {(Room::floorLeft + Room::floorRight) / 2.0f,
-                  (Room::floorTop + Room::floorBottom) / 2.0f - bodyOffsetY - bodyHeight / 2};
-        direction = 0;
-        walkStep = 0;
-        walkElapsed = 0;
-        walking = false;
-        controllerConnected = false;
-        buttonMessage = nullptr;
-        buttonPressedAt = 0;
-        if (!PlayerSprite::load()) Serial.println(PlayerSprite::error());
-        if (!RoomTiles::load()) Serial.println(RoomTiles::error());
+    void begin() { begin(esp_random()); }
+
+    void begin(uint32_t seed) {
+        app_log_heap("Vor Dungeon-Erzeugung");
+        Room::generate(seed);
+        ESP_LOGI("Game", "Dungeon v1 seed=%lu tiles=%dx%d world=%dx%d map=%u bytes two_buffers=%u",
+            (unsigned long)Room::map().seed, Room::columns(), Room::rows(),
+            Room::width(), Room::height(), unsigned(sizeof(Room::Map)), unsigned(2 * sizeof(Room::Map)));
+        startScene();
+    }
+
+    bool beginFromLevel(const char* path) {
+        if (!DungeonFile::load(path)) {
+            Serial.println(DungeonFile::error());
+            return false;
+        }
+        startScene();
+        return true;
     }
 
     void update(const GameInput::InputState& input, float deltaTime) {
@@ -133,12 +157,13 @@ namespace Game {
         if (!guard.acquired()) return;
         GD.ClearColorRGB(15, 25, 65);
         GD.Clear();
-        RoomTiles::drawGround();
+        const auto camera = Camera::follow(player.x, player.y);
+        RoomTiles::drawGround(camera);
 
-        PlayerSprite::draw(static_cast<int>(player.x) - playerHalfSize,
-                           static_cast<int>(player.y) - playerHalfSize,
+        PlayerSprite::draw(Camera::centerX - playerHalfSize,
+                           Camera::centerY - playerHalfSize,
                            direction, walking ? walkColumns[walkStep] : 1);
-        RoomTiles::drawCeiling();
+        RoomTiles::drawCeiling(camera);
         if (!PlayerSprite::ready()) {
             GD.ColorRGB(255, 180, 50);
             GD.cmd_text(240, 184, 26, OPT_CENTER, PlayerSprite::error());
@@ -152,7 +177,7 @@ namespace Game {
         GD.ColorRGB(0, 0, 0);
         GD.ColorA(180);
         GD.Begin(RECTS);
-        GD.Vertex2ii(0, 0); GD.Vertex2ii(Room::width, statusHeight);
+        GD.Vertex2ii(0, 0); GD.Vertex2ii(Camera::width, statusHeight);
         GD.End();
         GD.ColorA(255);
         GD.ColorRGB(255, 255, 255);

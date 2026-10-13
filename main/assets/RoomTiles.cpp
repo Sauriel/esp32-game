@@ -20,7 +20,7 @@ constexpr uint32_t address = TitleBackground::address + TitleBackground::bytes;
 constexpr uint32_t endAddress = address + floorBytes + wallBytes + ceilingBytes;
 static_assert(address % 4 == 0 && quarterBytes % 4 == 0 && endAddress <= 256 * 1024,
               "Room tiles exceed RAM_G budget");
-static_assert(Room::columns * Room::rows * 4 * 8 + 512 < 4096,
+static_assert(Camera::maxVisibleColumns * Camera::maxVisibleRows * 4 * 8 + 512 < 4096,
               "Room bitmap commands exceed reserved display-list budget");
 struct Sheet {
     const char* path;
@@ -96,12 +96,14 @@ unsigned quarterCell(Room::Tile material, int column, int row, unsigned quadrant
     }
     return y * 4 + x;
 }
-void drawSheet(const Sheet& sheet) {
+void drawSheet(const Sheet& sheet, const Camera::View& camera) {
     GD.SaveContext();
     GD.ColorRGB(255, 255, 255);
     if (sheet.loaded) {
         GD.BitmapHandle(sheet.handle);
+        GD.Cell(0);
         GD.BitmapLayout(ARGB4, quarterSize * 2, quarterSize);
+        GD.BitmapSize(NEAREST, BORDER, BORDER, quarterSize, quarterSize);
         GD.Begin(BITMAPS);
     } else {
         GD.ColorRGB(sheet.material == Room::Tile::Floor ? 0x63705c :
@@ -109,26 +111,22 @@ void drawSheet(const Sheet& sheet) {
         GD.LineWidth(16);
         GD.Begin(RECTS);
     }
-    for (int row = 0; row < Room::rows; ++row) {
-        const unsigned halfHeight = Room::rowHeight(row) / 2;
-        if (sheet.loaded) GD.BitmapSize(NEAREST, BORDER, BORDER, quarterSize, halfHeight);
-        for (int column = 0; column < Room::columns; ++column) {
+    for (int row = camera.firstRow(); row <= camera.lastRow(); ++row) {
+        for (int column = camera.firstColumn(); column <= camera.lastColumn(); ++column) {
             if (Room::tile(column, row) != sheet.material) continue;
-            const int x = column * Room::tileSize, y = Room::rowY(row);
+            const int x = column * Room::tileSize - camera.x;
+            const int y = row * Room::tileSize - camera.y;
             if (!sheet.loaded) {
-                GD.Vertex2ii(x, y);
-                GD.Vertex2ii(x + Room::tileSize, y + Room::rowHeight(row));
+                GD.Vertex2f(x * 16, y * 16);
+                GD.Vertex2f((x + Room::tileSize) * 16, (y + Room::tileSize) * 16);
                 continue;
             }
             for (unsigned quadrant = 0; quadrant < 4; ++quadrant) {
                 const bool bottom = quadrant & 2;
-                // Der vorletzte Raumstreifen ist 32px hoch: innen kuerzen,
-                // aeussere obere/untere Autotile-Raender bleiben erhalten.
-                const unsigned crop = bottom ? quarterSize - halfHeight : 0;
                 GD.BitmapSource(sheet.address + quarterCell(sheet.material, column, row, quadrant) *
-                                quarterBytes + crop * quarterSize * 2);
-                GD.Vertex2ii(x + (quadrant & 1) * quarterSize,
-                             y + (bottom ? halfHeight : 0), sheet.handle, 0);
+                                quarterBytes);
+                GD.Vertex2f((x + int(quadrant & 1) * int(quarterSize)) * 16,
+                             (y + (bottom ? int(quarterSize) : 0)) * 16);
             }
         }
     }
@@ -156,6 +154,6 @@ bool load() {
     return failure == nullptr;
 }
 const char* error() { return failure; }
-void drawGround() { drawSheet(sheets[0]); drawSheet(sheets[1]); }
-void drawCeiling() { drawSheet(sheets[2]); }
+void drawGround(const Camera::View& camera) { drawSheet(sheets[0], camera); drawSheet(sheets[1], camera); }
+void drawCeiling(const Camera::View& camera) { drawSheet(sheets[2], camera); }
 }
